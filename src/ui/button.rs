@@ -530,13 +530,13 @@ impl FloatingButton {
             self.draw_bubble(cr, bx, oy + PAD + s, &self.live_text.borrow());
         }
 
-        // While recording, a soft halo in the recording colour spreads from
-        // the rim, a little wider as the voice gets louder.
-        if recording {
-            let spread = 10.0 + self.level.get() as f64 * 10.0;
+        // The halo in the chosen colour is part of the mark: always there,
+        // hugging the rim, and a little wider while you speak.
+        {
+            let spread = if recording { 8.0 + self.level.get() as f64 * 12.0 } else { 8.0 };
             let glow = cairo::RadialGradient::new(cx, cy, s / 2.0 - 1.0, cx, cy, s / 2.0 + spread);
-            glow.add_color_stop_rgba(0.0, ar, ag, ab, 0.60);
-            glow.add_color_stop_rgba(0.45, ar, ag, ab, 0.22);
+            glow.add_color_stop_rgba(0.0, ar, ag, ab, 0.70);
+            glow.add_color_stop_rgba(0.4, ar, ag, ab, 0.28);
             glow.add_color_stop_rgba(1.0, ar, ag, ab, 0.0);
             let _ = cr.set_source(&glow);
             cr.arc(cx, cy, s / 2.0 + spread, 0.0, TAU);
