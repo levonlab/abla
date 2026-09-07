@@ -120,11 +120,14 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let status = gtk::Label::new(None);
     status.set_wrap(true);
     status.set_xalign(0.0);
-    status.add_css_class("dim-label");
     status.set_hexpand(true);
+    let change_key = gtk::Button::with_label("Use another key");
+    change_key.add_css_class("flat");
+    change_key.set_visible(false);
     connect_row.append(&connect);
     connect_row.append(&spinner);
     connect_row.append(&status);
+    connect_row.append(&change_key);
     grid.attach(&connect_row, 1, 4, 1, 1);
 
     // Model
@@ -173,7 +176,8 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     // ---- behaviour -------------------------------------------------------
 
-    let connected: Rc<RefCell<Option<Target>>> = Rc::new(RefCell::new(None));
+    /// What the last check said, and about which provider and key.
+    let outcome: Rc<RefCell<Option<(Target, Result<usize, String>)>>> = Rc::new(RefCell::new(None));
 
     let effective_key = {
         let key = key.clone();
@@ -202,16 +206,38 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         move || save.set_sensitive(!effective_key().is_empty() && !models.borrow().is_empty())
     };
 
-    // The Connect button only shows for a provider and key that have not
-    // been checked yet.
+    // The status line always describes the provider and key on screen:
+    // green once they are checked, red when they were refused, blank when
+    // they have not been tried. Connect only shows for the untried ones.
     let refresh_connect = {
         let connect = connect.clone();
-        let connected = connected.clone();
+        let change_key = change_key.clone();
+        let status = status.clone();
+        let outcome = outcome.clone();
         let current_target = current_target.clone();
         move || {
             let target = current_target();
-            let is_connected = connected.borrow().as_ref() == Some(&target);
-            connect.set_visible(!is_connected);
+            status.remove_css_class("success");
+            status.remove_css_class("error");
+            match outcome.borrow().as_ref() {
+                Some((t, Ok(n))) if *t == target => {
+                    status.set_text(&format!("✓ Connected. {n} transcription model{}.", if *n == 1 { "" } else { "s" }));
+                    status.add_css_class("success");
+                    connect.set_visible(false);
+                    change_key.set_visible(true);
+                }
+                Some((t, Err(e))) if *t == target => {
+                    status.set_text(&format!("✗ {e}"));
+                    status.add_css_class("error");
+                    connect.set_visible(true);
+                    change_key.set_visible(false);
+                }
+                _ => {
+                    status.set_text("");
+                    connect.set_visible(true);
+                    change_key.set_visible(false);
+                }
+            }
         }
     };
 
@@ -258,7 +284,6 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                 models.borrow_mut().clear();
                 model_list.splice(0, model_list.n_items(), &[]);
                 model.set_sensitive(false);
-                status.set_text("");
             }
             refresh_save();
             refresh_connect();
@@ -270,6 +295,13 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         key.connect_changed(move |_| {
             refresh_save();
             refresh_connect();
+        });
+    }
+    {
+        let key = key.clone();
+        change_key.connect_clicked(move |_| {
+            key.set_text("");
+            key.grab_focus();
         });
     }
     {
@@ -287,7 +319,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let model = model.clone();
         let refresh_save = refresh_save.clone();
         let refresh_connect = refresh_connect.clone();
-        let connected = connected.clone();
+        let outcome = outcome.clone();
         let saved_model = config.provider.model.clone();
         connect.connect_clicked(move |button| {
             let target = current_target();
@@ -303,6 +335,8 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             button.set_sensitive(false);
             spinner.start();
             spinner.set_visible(true);
+            status.remove_css_class("error");
+            status.remove_css_class("success");
             status.set_text("Asking the provider which models this key can use…");
             let (tx, rx) = channel();
             std::thread::spawn(move || {
@@ -317,18 +351,18 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             let model = model.clone();
             let refresh_save = refresh_save.clone();
             let refresh_connect = refresh_connect.clone();
-            let connected = connected.clone();
+            let outcome = outcome.clone();
             let saved_model = saved_model.clone();
             glib::timeout_add_local(Duration::from_millis(80), move || {
-                let outcome = match rx.try_recv() {
-                    Ok(outcome) => outcome,
+                let result = match rx.try_recv() {
+                    Ok(result) => result,
                     Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(anyhow::anyhow!("the request was interrupted")),
                 };
                 spinner.stop();
                 spinner.set_visible(false);
                 button.set_sensitive(true);
-                match outcome {
+                let summary = match result {
                     Ok(list) => {
                         let labels: Vec<String> = list.iter().map(model_label).collect();
                         let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
@@ -339,13 +373,11 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                         models_kind.set(kind);
                         model.set_selected(selected as u32);
                         model.set_sensitive(true);
-                        *connected.borrow_mut() = Some(target.clone());
-                        status.set_text(&format!("Connected. {n} transcription model{}.", if n == 1 { "" } else { "s" }));
+                        Ok(n)
                     }
-                    Err(err) => {
-                        status.set_text(&format!("{err:#}"));
-                    }
-                }
+                    Err(err) => Err(capitalize(&format!("{err:#}"))),
+                };
+                *outcome.borrow_mut() = Some((target.clone(), summary));
                 refresh_save();
                 refresh_connect();
                 glib::ControlFlow::Break
@@ -397,6 +429,14 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     // With a key at hand, fetch today's model list straight away.
     if !effective_key().is_empty() {
         connect.emit_clicked();
+    }
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }
 

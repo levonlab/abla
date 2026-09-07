@@ -82,6 +82,9 @@ pub struct FloatingButton {
     bars: RefCell<[f32; 5]>,
     spin: Cell<f64>,
     live_text: RefCell<String>,
+    /// Byte offset into `live_text` where the panel starts showing, so the
+    /// last lines stay in view as the text grows.
+    live_start: Cell<usize>,
     drag: Cell<Option<Drag>>,
     moved_at: Cell<Option<Instant>>,
     ticking: Cell<bool>,
@@ -121,6 +124,7 @@ impl FloatingButton {
             bars: RefCell::new([0.0; 5]),
             spin: Cell::new(0.0),
             live_text: RefCell::new(String::new()),
+            live_start: Cell::new(0),
             drag: Cell::new(None),
             moved_at: Cell::new(None),
             ticking: Cell::new(false),
@@ -296,6 +300,7 @@ impl FloatingButton {
         match Recorder::start(live_tx) {
             Ok(recorder) => {
                 self.live_text.borrow_mut().clear();
+                self.live_start.set(0);
                 self.level.set(0.0);
                 *self.bars.borrow_mut() = [0.0; 5];
                 *self.state.borrow_mut() = State::Recording { recorder, started: Instant::now(), live };
@@ -456,11 +461,13 @@ impl FloatingButton {
         if let Some(text) = deliver {
             *self.state.borrow_mut() = State::Done { until: Instant::now() + Duration::from_millis(1500) };
             self.live_text.borrow_mut().clear();
+            self.live_start.set(0);
             self.deliver(text);
         }
         if let Some(message) = error {
             *self.state.borrow_mut() = State::Idle;
             self.live_text.borrow_mut().clear();
+            self.live_start.set(0);
             notify(&format!("Transcription failed: {message}"));
             finished = true;
         }
@@ -580,14 +587,39 @@ impl FloatingButton {
         self.set_input_region(ox, oy, bw, bh);
     }
 
+    /// The panel shows the tail of the text: once it outgrows its lines,
+    /// whole words drop off the front and everything moves up, the way a
+    /// terminal scrolls.
     fn draw_bubble(&self, cr: &cairo::Context, x: f64, bottom: f64, text: &str) {
         let layout = pangocairo::functions::create_layout(cr);
         layout.set_font_description(Some(&pango::FontDescription::from_string("Sans 11")));
         layout.set_width(((BUBBLE_W - 28.0) * pango::SCALE as f64) as i32);
         layout.set_wrap(pango::WrapMode::WordChar);
-        layout.set_ellipsize(pango::EllipsizeMode::Start);
-        layout.set_height(-BUBBLE_LINES);
-        layout.set_text(text);
+        let mut start = self.live_start.get().min(text.len());
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        loop {
+            if start == 0 {
+                layout.set_text(text);
+            } else {
+                layout.set_text(&format!("…{}", &text[start..]));
+            }
+            if layout.line_count() <= BUBBLE_LINES || start >= text.len() {
+                break;
+            }
+            let rest = &text[start..];
+            let Some(word_end) = rest.find(char::is_whitespace) else { break };
+            let mut next = start + word_end;
+            while next < text.len() && text[next..].starts_with(char::is_whitespace) {
+                next += text[next..].chars().next().map_or(1, char::len_utf8);
+            }
+            if next <= start {
+                break;
+            }
+            start = next;
+        }
+        self.live_start.set(start);
         let (_, text_h) = layout.pixel_size();
         let h = text_h as f64 + 24.0;
         let y = (bottom - h).max(0.0);

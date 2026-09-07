@@ -76,6 +76,15 @@ impl Kind {
         let id = entry.get("id")?.as_str()?.to_string();
         match self {
             Kind::Mistral => {
+                // Dated snapshots that a `-latest` alias points at are the
+                // same model twice; only the alias is offered.
+                let alias_is_latest = entry
+                    .get("aliases")
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| a.iter().filter_map(Value::as_str).any(|s| s.ends_with("-latest")));
+                if alias_is_latest && !id.ends_with("-latest") {
+                    return None;
+                }
                 let caps = entry.get("capabilities")?;
                 let flag = |name: &str| caps.get(name).and_then(Value::as_bool).unwrap_or(false);
                 if flag("audio_transcription_realtime") {
@@ -193,6 +202,19 @@ mod tests {
         assert_eq!(Kind::Mistral.classify(&batch).unwrap().realtime, false);
         assert_eq!(Kind::Mistral.classify(&live).unwrap().realtime, true);
         assert!(Kind::Mistral.classify(&chat).is_none());
+    }
+
+    #[test]
+    fn mistral_dated_copies_of_latest_are_hidden() {
+        let dated = json!({"id": "voxtral-mini-2602", "aliases": ["voxtral-mini-latest"],
+                           "capabilities": {"audio_transcription": true}});
+        let latest = json!({"id": "voxtral-mini-latest", "aliases": ["voxtral-mini-2602"],
+                            "capabilities": {"audio_transcription": true}});
+        let lone = json!({"id": "voxtral-mini-2512", "aliases": [],
+                          "capabilities": {"audio_transcription": true}});
+        assert!(Kind::Mistral.classify(&dated).is_none());
+        assert!(Kind::Mistral.classify(&latest).is_some());
+        assert!(Kind::Mistral.classify(&lone).is_some(), "a snapshot with no alias is still offered");
     }
 
     #[test]
