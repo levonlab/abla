@@ -176,7 +176,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     // ---- behaviour -------------------------------------------------------
 
-    /// What the last check said, and about which provider and key.
+    // What the last check said, and about which provider and key.
     let outcome: Rc<RefCell<Option<(Target, Result<usize, String>)>>> = Rc::new(RefCell::new(None));
 
     let effective_key = {
@@ -273,7 +273,6 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let models_kind = models_kind.clone();
         let model_list = model_list.clone();
         let model = model.clone();
-        let status = status.clone();
         let refresh_save = refresh_save.clone();
         let refresh_connect = refresh_connect.clone();
         provider.connect_selected_notify(move |provider| {
@@ -344,7 +343,6 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             });
             let button = button.clone();
             let spinner = spinner.clone();
-            let status = status.clone();
             let models = models.clone();
             let models_kind = models_kind.clone();
             let model_list = model_list.clone();
