@@ -3,6 +3,7 @@
 //! The file holds the API key, so it is written with mode 0600 inside a
 //! 0700 directory. `ABLA_API_KEY` in the environment overrides the stored key.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -16,9 +17,22 @@ use crate::providers::Kind;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// The provider in use.
     pub provider: Provider,
     pub button: Button,
     pub general: General,
+    /// Key and model last used with each provider, so switching back to
+    /// one does not mean pasting its key again.
+    pub remembered: BTreeMap<String, Remembered>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Remembered {
+    pub api_key: String,
+    pub base_url: String,
+    pub model: String,
+    pub realtime: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,6 +174,32 @@ impl Config {
     pub fn kind(&self) -> Kind {
         Kind::from_id(&self.provider.name)
     }
+
+    /// What was last used with `kind`: the live settings for the current
+    /// provider, the remembered ones for any other.
+    pub fn remembered_for(&self, kind: Kind) -> Option<Remembered> {
+        if self.kind() == kind {
+            return Some(Remembered {
+                api_key: self.provider.api_key.clone(),
+                base_url: self.provider.base_url.clone(),
+                model: self.provider.model.clone(),
+                realtime: self.provider.realtime,
+            });
+        }
+        self.remembered.get(kind.id()).cloned()
+    }
+
+    /// Makes `provider` the one in use and files the previous one away.
+    pub fn switch_provider(&mut self, provider: Provider) {
+        let old = std::mem::replace(&mut self.provider, provider);
+        if !old.api_key.is_empty() || !old.model.is_empty() {
+            self.remembered.insert(
+                old.name.clone(),
+                Remembered { api_key: old.api_key, base_url: old.base_url, model: old.model, realtime: old.realtime },
+            );
+        }
+        self.remembered.remove(&self.provider.name);
+    }
 }
 
 /// Parses `#rrggbb` into 0..1 components. Falls back to the default red.
@@ -198,6 +238,27 @@ mod tests {
         assert_eq!(back.button.size, 88);
         assert_eq!(back.button.color, Button::default().color);
         assert_eq!(back.provider.name, "mistral");
+    }
+
+    #[test]
+    fn switching_providers_remembers_the_old_one() {
+        let mut config = Config::default();
+        config.provider.api_key = "mistral-key".into();
+        config.provider.model = "voxtral-mini-latest".into();
+        let openai = Provider {
+            name: "openai".into(),
+            base_url: Kind::OpenAi.default_base_url().into(),
+            api_key: "openai-key".into(),
+            model: "gpt-4o-transcribe".into(),
+            ..Provider::default()
+        };
+        config.switch_provider(openai);
+        assert_eq!(config.provider.api_key, "openai-key");
+        let back = config.remembered_for(Kind::Mistral).unwrap();
+        assert_eq!(back.api_key, "mistral-key");
+        assert_eq!(back.model, "voxtral-mini-latest");
+        assert_eq!(config.remembered_for(Kind::OpenAi).unwrap().api_key, "openai-key");
+        assert!(config.remembered_for(Kind::Groq).is_none());
     }
 
     #[test]

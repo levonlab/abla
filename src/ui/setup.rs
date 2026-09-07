@@ -273,19 +273,42 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let models_kind = models_kind.clone();
         let model_list = model_list.clone();
         let model = model.clone();
+        let key = key.clone();
+        let base_url = base_url.clone();
+        let connect = connect.clone();
+        let effective_key = effective_key.clone();
         let refresh_save = refresh_save.clone();
         let refresh_connect = refresh_connect.clone();
+        let config = config.clone();
         provider.connect_selected_notify(move |provider| {
             apply_provider(false);
-            // A different provider means a different model list.
             let kind = ALL[provider.selected() as usize];
-            if kind != models_kind.get() {
-                models.borrow_mut().clear();
-                model_list.splice(0, model_list.n_items(), &[]);
-                model.set_sensitive(false);
+            if kind == models_kind.get() {
+                return;
+            }
+            // Each provider has its own key and model list. Bring back what
+            // was last used with this one, or start clean.
+            models.borrow_mut().clear();
+            model_list.splice(0, model_list.n_items(), &[]);
+            model.set_sensitive(false);
+            models_kind.set(kind);
+            let remembered = config.remembered_for(kind).unwrap_or_default();
+            key.set_text(&remembered.api_key);
+            if kind == Kind::Custom && !remembered.base_url.is_empty() {
+                base_url.set_text(&remembered.base_url);
+            }
+            if !remembered.model.is_empty() {
+                let known = Model { id: remembered.model.clone(), realtime: remembered.realtime };
+                model_list.append(&model_label(&known));
+                models.borrow_mut().push(known);
+                model.set_selected(0);
+                model.set_sensitive(true);
             }
             refresh_save();
             refresh_connect();
+            if !effective_key().is_empty() {
+                connect.emit_clicked();
+            }
         });
     }
     {
@@ -403,12 +426,14 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                 }
             };
             let mut new_config = config.clone();
-            new_config.provider.name = kind.id().to_string();
-            new_config.provider.base_url = base;
-            new_config.provider.api_key = key.text().trim().to_string();
-            new_config.provider.model = chosen.id;
-            new_config.provider.realtime = chosen.realtime;
-            new_config.provider.language = LANGUAGES[language.selected() as usize].1.to_string();
+            new_config.switch_provider(crate::config::Provider {
+                name: kind.id().to_string(),
+                base_url: base,
+                api_key: key.text().trim().to_string(),
+                model: chosen.id,
+                realtime: chosen.realtime,
+                language: LANGUAGES[language.selected() as usize].1.to_string(),
+            });
             new_config.general.autostart = autostart.is_active();
             if let Err(err) = desktop::set_autostart(autostart.is_active()) {
                 log::warn!("autostart: {err:#}");
