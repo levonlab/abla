@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Abla
+GenericName=Voice dictation
+Comment=Speak, and the text lands where your cursor is
+Exec={exec}
+Icon=abla
+Terminal=false
+Categories=Utility;Accessibility;AudioVideo;
+Keywords=dictation;voice;speech;transcribe;microphone;typing;
+StartupNotify=false
+SingleMainWindow=true

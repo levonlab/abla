@@ -1,0 +1,18 @@
+# Build output
+/target/
+
+# Local overrides and secrets
+.env
+*.local.toml
+
+# Editors and tooling
+.idea/
+.vscode/
+.claude/
+*.swp
+*~
+.DS_Store
+
+# Test artefacts
+*.wav
+*.profraw
