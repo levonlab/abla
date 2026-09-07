@@ -6,6 +6,7 @@ mod inject;
 mod providers;
 mod realtime;
 mod transcribe;
+mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -54,10 +55,9 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let cli = Cli::parse();
     let result = match cli.command {
-        None | Some(Command::Setup) | Some(Command::Toggle) => {
-            eprintln!("The floating button is not built yet; try `abla doctor` or `abla transcribe`.");
-            return ExitCode::FAILURE;
-        }
+        None => return exit_code(ui::run(ui::Start::Button)),
+        Some(Command::Setup) => return exit_code(ui::run(ui::Start::Settings)),
+        Some(Command::Toggle) => ui::send_toggle(),
         Some(Command::Doctor) => return doctor::run(),
         Some(Command::Desktop) => desktop::install().map(|paths| {
             for p in paths {
@@ -75,6 +75,16 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("abla: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn exit_code(result: Result<i32>) -> ExitCode {
+    match result {
+        Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
         Err(err) => {
             eprintln!("abla: {err:#}");
             ExitCode::FAILURE

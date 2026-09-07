@@ -66,10 +66,6 @@ impl Recorder {
         f32::from_bits(self.level.load(Ordering::Relaxed))
     }
 
-    pub fn seconds(&self) -> f32 {
-        self.pcm.lock().unwrap().len() as f32 / BYTES_PER_SECOND as f32
-    }
-
     /// Stops the capture and returns everything recorded.
     pub fn stop(mut self) -> Vec<u8> {
         let _ = self.child.kill();

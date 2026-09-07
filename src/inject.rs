@@ -2,12 +2,11 @@
 //! daemon.
 //!
 //! Wayland has no portable way to type into another application. `ydotoold`
-//! owns `/dev/uinput` and accepts raw `input_event` structs over a Unix
-//! socket; each event is 24 bytes on 64-bit Linux: a zeroed `timeval`,
-//! `type`, `code` and `value`.
+//! owns `/dev/uinput` and accepts raw `input_event` structs, one per
+//! datagram, over a Unix socket; each event is 24 bytes on 64-bit Linux: a
+//! zeroed `timeval`, `type`, `code` and `value`.
 
-use std::io::Write;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -33,15 +32,22 @@ pub fn socket_path() -> PathBuf {
     PathBuf::from("/tmp/.ydotool_socket")
 }
 
+fn connect() -> Result<UnixDatagram> {
+    let path = socket_path();
+    let socket = UnixDatagram::unbound()?;
+    socket
+        .connect(&path)
+        .with_context(|| format!("ydotool is not running (no socket at {})", path.display()))?;
+    socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+    Ok(socket)
+}
+
 pub fn available() -> bool {
-    UnixStream::connect(socket_path()).is_ok()
+    connect().is_ok()
 }
 
 pub fn ctrl_v() -> Result<()> {
-    let path = socket_path();
-    let mut socket = UnixStream::connect(&path)
-        .with_context(|| format!("ydotool is not running (no socket at {})", path.display()))?;
-    socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let socket = connect()?;
     let steps = [
         (KEY_LEFTCTRL, 1),
         (KEY_V, 1),
@@ -49,8 +55,8 @@ pub fn ctrl_v() -> Result<()> {
         (KEY_LEFTCTRL, 0),
     ];
     for (code, value) in steps {
-        socket.write_all(&event(EV_KEY, code, value))?;
-        socket.write_all(&event(EV_SYN, SYN_REPORT, 0))?;
+        socket.send(&event(EV_KEY, code, value))?;
+        socket.send(&event(EV_SYN, SYN_REPORT, 0))?;
         std::thread::sleep(Duration::from_millis(8));
     }
     Ok(())
