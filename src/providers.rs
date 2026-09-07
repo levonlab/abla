@@ -1,8 +1,8 @@
 //! Transcription providers that speak the OpenAI-style `/v1/audio/transcriptions`
 //! API, and how to list the models a given key can use.
 //!
-//! Prices are deliberately not here: no provider exposes them through its API,
-//! so abla links to the official pricing page instead of guessing.
+//! Prices are deliberately absent: no provider exposes them through its API,
+//! and what a key costs is between its owner and the provider.
 
 use std::time::Duration;
 
@@ -66,16 +66,6 @@ impl Kind {
             Kind::Mistral => Some("https://console.mistral.ai/api-keys"),
             Kind::OpenAi => Some("https://platform.openai.com/api-keys"),
             Kind::Groq => Some("https://console.groq.com/keys"),
-            Kind::Custom => None,
-        }
-    }
-
-    /// The official price list. abla never prints prices of its own.
-    pub fn pricing_url(self) -> Option<&'static str> {
-        match self {
-            Kind::Mistral => Some("https://mistral.ai/pricing/"),
-            Kind::OpenAi => Some("https://developers.openai.com/api/docs/pricing"),
-            Kind::Groq => Some("https://console.groq.com/docs/models"),
             Kind::Custom => None,
         }
     }

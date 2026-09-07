@@ -2,13 +2,13 @@
 //! The model list comes from the provider with the user's own key, so it is
 //! always today's list and never one we typed in.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use gtk::prelude::*;
 use gtk::glib;
+use gtk::prelude::*;
 
 use crate::config::Config;
 use crate::desktop;
@@ -34,6 +34,9 @@ const LANGUAGES: [(&str, &str); 18] = [
     ("日本語", "ja"),
     ("한국어", "ko"),
 ];
+
+/// Provider, base URL and key that a model list was fetched with.
+type Target = (Kind, String, String);
 
 pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 'static) {
     let window = gtk::Window::builder()
@@ -79,8 +82,8 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let labels: Vec<&str> = ALL.iter().map(|k| k.label()).collect();
     let provider = gtk::DropDown::from_strings(&labels);
     provider.set_hexpand(true);
-    let current_kind = config.kind();
-    provider.set_selected(ALL.iter().position(|k| *k == current_kind).unwrap_or(0) as u32);
+    let saved_kind = config.kind();
+    provider.set_selected(ALL.iter().position(|k| *k == saved_kind).unwrap_or(0) as u32);
     grid.attach(&field_label("Provider"), 0, 0, 1, 1);
     grid.attach(&provider, 1, 0, 1, 1);
 
@@ -101,26 +104,13 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     if env_key.is_some() && config.provider.api_key.is_empty() {
         key.set_placeholder_text(Some("Using ABLA_API_KEY from the environment"));
     }
-    let effective_key = {
-        let key = key.clone();
-        let env_key = env_key.clone();
-        move || {
-            let typed = key.text().trim().to_string();
-            if typed.is_empty() { env_key.clone().unwrap_or_default() } else { typed }
-        }
-    };
     grid.attach(&field_label("API key"), 0, 2, 1, 1);
     grid.attach(&key, 1, 2, 1, 1);
 
-    let links = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let key_link = gtk::LinkButton::with_label("https://example.invalid", "Get a key");
-    let price_link = gtk::LinkButton::with_label("https://example.invalid", "Prices");
-    for l in [&key_link, &price_link] {
-        l.add_css_class("flat");
-    }
-    links.append(&key_link);
-    links.append(&price_link);
-    grid.attach(&links, 1, 3, 1, 1);
+    key_link.add_css_class("flat");
+    key_link.set_halign(gtk::Align::Start);
+    grid.attach(&key_link, 1, 3, 1, 1);
 
     // Connect
     let connect_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -141,6 +131,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let model_list = gtk::StringList::new(&[]);
     let model = gtk::DropDown::new(Some(model_list.clone()), None::<gtk::Expression>);
     let models: Rc<RefCell<Vec<Model>>> = Rc::new(RefCell::new(Vec::new()));
+    let models_kind = Rc::new(Cell::new(saved_kind));
     if !config.provider.model.is_empty() {
         models.borrow_mut().push(Model { id: config.provider.model.clone(), realtime: config.provider.realtime });
         model_list.append(&model_label(&models.borrow()[0]));
@@ -182,9 +173,26 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     // ---- behaviour -------------------------------------------------------
 
-    let selected_kind = {
+    let connected: Rc<RefCell<Option<Target>>> = Rc::new(RefCell::new(None));
+
+    let effective_key = {
+        let key = key.clone();
+        let env_key = env_key.clone();
+        move || {
+            let typed = key.text().trim().to_string();
+            if typed.is_empty() { env_key.clone().unwrap_or_default() } else { typed }
+        }
+    };
+
+    let current_target = {
         let provider = provider.clone();
-        move || ALL[provider.selected() as usize]
+        let base_url = base_url.clone();
+        let effective_key = effective_key.clone();
+        move || -> Target {
+            let kind = ALL[provider.selected() as usize];
+            let base = normalize_base_url(&base_url.text()).unwrap_or_default();
+            (kind, base, effective_key())
+        }
     };
 
     let refresh_save = {
@@ -194,22 +202,31 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         move || save.set_sensitive(!effective_key().is_empty() && !models.borrow().is_empty())
     };
 
+    // The Connect button only shows for a provider and key that have not
+    // been checked yet.
+    let refresh_connect = {
+        let connect = connect.clone();
+        let connected = connected.clone();
+        let current_target = current_target.clone();
+        move || {
+            let target = current_target();
+            let is_connected = connected.borrow().as_ref() == Some(&target);
+            connect.set_visible(!is_connected);
+        }
+    };
+
     let apply_provider = {
         let base_url = base_url.clone();
         let base_label = base_label.clone();
         let key_link = key_link.clone();
-        let price_link = price_link.clone();
-        let selected_kind = selected_kind.clone();
+        let provider = provider.clone();
         move |initial: bool| {
-            let kind = selected_kind();
+            let kind = ALL[provider.selected() as usize];
             let custom = kind == Kind::Custom;
             base_url.set_visible(custom);
             base_label.set_visible(custom);
             if !initial && !custom {
                 base_url.set_text(kind.default_base_url());
-            }
-            if initial && custom && base_url.text().is_empty() {
-                base_url.set_text("");
             }
             match kind.key_url() {
                 Some(url) => {
@@ -218,69 +235,71 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                 }
                 None => key_link.set_visible(false),
             }
-            match kind.pricing_url() {
-                Some(url) => {
-                    price_link.set_uri(url);
-                    price_link.set_visible(true);
-                }
-                None => price_link.set_visible(false),
-            }
         }
     };
     apply_provider(true);
     refresh_save();
+    refresh_connect();
 
     {
         let apply_provider = apply_provider.clone();
         let models = models.clone();
+        let models_kind = models_kind.clone();
         let model_list = model_list.clone();
         let model = model.clone();
         let status = status.clone();
         let refresh_save = refresh_save.clone();
-        let original_kind = current_kind;
-        provider.connect_selected_notify(move |_| {
+        let refresh_connect = refresh_connect.clone();
+        provider.connect_selected_notify(move |provider| {
             apply_provider(false);
             // A different provider means a different model list.
-            let kind = selected_kind();
-            if kind != original_kind {
+            let kind = ALL[provider.selected() as usize];
+            if kind != models_kind.get() {
                 models.borrow_mut().clear();
                 model_list.splice(0, model_list.n_items(), &[]);
                 model.set_sensitive(false);
                 status.set_text("");
             }
             refresh_save();
+            refresh_connect();
         });
     }
     {
         let refresh_save = refresh_save.clone();
-        key.connect_changed(move |_| refresh_save());
+        let refresh_connect = refresh_connect.clone();
+        key.connect_changed(move |_| {
+            refresh_save();
+            refresh_connect();
+        });
+    }
+    {
+        let refresh_connect = refresh_connect.clone();
+        base_url.connect_changed(move |_| refresh_connect());
     }
 
     {
-        let effective_key = effective_key.clone();
-        let base_url = base_url.clone();
-        let provider = provider.clone();
+        let current_target = current_target.clone();
         let spinner = spinner.clone();
         let status = status.clone();
         let models = models.clone();
+        let models_kind = models_kind.clone();
         let model_list = model_list.clone();
         let model = model.clone();
         let refresh_save = refresh_save.clone();
+        let refresh_connect = refresh_connect.clone();
+        let connected = connected.clone();
         let saved_model = config.provider.model.clone();
         connect.connect_clicked(move |button| {
-            let kind = ALL[provider.selected() as usize];
-            let api_key = effective_key();
+            let target = current_target();
+            let (kind, base, api_key) = target.clone();
             if api_key.is_empty() {
                 status.set_text("Paste an API key first.");
                 return;
             }
-            let base = match normalize_base_url(&base_url.text()) {
-                Ok(b) => b,
-                Err(e) => {
-                    status.set_text(&format!("{e}"));
-                    return;
-                }
-            };
+            if base.is_empty() {
+                status.set_text("The base URL must start with https://");
+                return;
+            }
             button.set_sensitive(false);
             spinner.start();
             spinner.set_visible(true);
@@ -293,9 +312,12 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             let spinner = spinner.clone();
             let status = status.clone();
             let models = models.clone();
+            let models_kind = models_kind.clone();
             let model_list = model_list.clone();
             let model = model.clone();
             let refresh_save = refresh_save.clone();
+            let refresh_connect = refresh_connect.clone();
+            let connected = connected.clone();
             let saved_model = saved_model.clone();
             glib::timeout_add_local(Duration::from_millis(80), move || {
                 let outcome = match rx.try_recv() {
@@ -312,17 +334,20 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                         let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
                         model_list.splice(0, model_list.n_items(), &label_refs);
                         let selected = list.iter().position(|m| m.id == saved_model).unwrap_or(0);
+                        let n = list.len();
                         *models.borrow_mut() = list;
+                        models_kind.set(kind);
                         model.set_selected(selected as u32);
                         model.set_sensitive(true);
-                        let n = models.borrow().len();
-                        status.set_text(&format!("Key accepted. {n} transcription model{}.", if n == 1 { "" } else { "s" }));
+                        *connected.borrow_mut() = Some(target.clone());
+                        status.set_text(&format!("Connected. {n} transcription model{}.", if n == 1 { "" } else { "s" }));
                     }
                     Err(err) => {
                         status.set_text(&format!("{err:#}"));
                     }
                 }
                 refresh_save();
+                refresh_connect();
                 glib::ControlFlow::Break
             });
         });

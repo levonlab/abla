@@ -1,10 +1,13 @@
 //! The floating button: a layer-shell surface that stays above every window
 //! and never takes keyboard focus, so the caret stays where you were typing.
 //!
-//! Everything inside is drawn with cairo: the disc, the microphone, the
-//! level bars while you talk, the seconds under the button, and the live
-//! text panel. Drawing it ourselves keeps it pixel-exact at any size and
-//! makes dragging the button around a matter of drawing it somewhere else.
+//! The surface quietly covers the whole screen, fully transparent, and its
+//! input region is shrunk to the button itself: clicks anywhere else fall
+//! through to the windows below. Drawing the button somewhere else is all it
+//! takes to move it, which is why dragging needs no surface tricks at all.
+//!
+//! Everything is drawn with cairo: the disc, the microphone, the level bars
+//! while you talk, the seconds under the button, and the live text panel.
 
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -25,7 +28,7 @@ use crate::{inject, realtime, transcribe};
 const PAD: f64 = 14.0;
 /// Height of the seconds line under the disc.
 const COUNTER_H: f64 = 22.0;
-/// Width of the live text panel, shown to the left of the disc.
+/// Width of the live text panel, shown beside the disc.
 const BUBBLE_W: f64 = 320.0;
 const BUBBLE_LINES: i32 = 3;
 const GAP: f64 = 10.0;
@@ -60,17 +63,13 @@ enum State {
     },
 }
 
-struct Move {
+#[derive(Clone, Copy)]
+struct Drag {
     /// Where inside the button box the pointer grabbed it.
     grab_x: f64,
     grab_y: f64,
-    /// Width of the surface before it grew to cover the screen.
-    small_w: i32,
-    /// Where the box was, as margins, until the pointer says otherwise.
-    right: i32,
-    bottom: i32,
-    /// Top-left corner of the box in screen coordinates, once known.
-    pos: Option<(f64, f64)>,
+    /// True once the pointer travelled far enough to count as a drag.
+    active: bool,
 }
 
 pub struct FloatingButton {
@@ -83,19 +82,17 @@ pub struct FloatingButton {
     bars: RefCell<[f32; 5]>,
     spin: Cell<f64>,
     live_text: RefCell<String>,
-    moving: RefCell<Option<Move>>,
+    drag: Cell<Option<Drag>>,
     moved_at: Cell<Option<Instant>>,
     ticking: Cell<bool>,
 }
 
 impl FloatingButton {
     pub fn new(app: Rc<App>) -> Rc<Self> {
-        let button = app.config.borrow().button.clone();
         let window = gtk::ApplicationWindow::builder()
             .application(&app.gtk)
             .title("Abla")
             .decorated(false)
-            .resizable(false)
             .build();
         window.add_css_class("abla-float");
 
@@ -103,10 +100,9 @@ impl FloatingButton {
         window.set_layer(Layer::Overlay);
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_namespace(Some("abla"));
-        window.set_anchor(Edge::Bottom, true);
-        window.set_anchor(Edge::Right, true);
-        window.set_margin(Edge::Bottom, button.margin_bottom);
-        window.set_margin(Edge::Right, button.margin_right);
+        for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
+            window.set_anchor(edge, true);
+        }
 
         let area = gtk::DrawingArea::new();
         window.set_child(Some(&area));
@@ -125,11 +121,10 @@ impl FloatingButton {
             bars: RefCell::new([0.0; 5]),
             spin: Cell::new(0.0),
             live_text: RefCell::new(String::new()),
-            moving: RefCell::new(None),
+            drag: Cell::new(None),
             moved_at: Cell::new(None),
             ticking: Cell::new(false),
         });
-        this.resize();
 
         {
             let me = this.clone();
@@ -141,8 +136,9 @@ impl FloatingButton {
         {
             let me = this.clone();
             click.connect_released(move |_, _, _, _| {
+                let dragging = me.drag.get().is_some_and(|d| d.active);
                 let just_moved = me.moved_at.get().is_some_and(|t| t.elapsed() < Duration::from_millis(300));
-                if me.moving.borrow().is_none() && !just_moved {
+                if !dragging && !just_moved {
                     me.toggle();
                 }
             });
@@ -164,11 +160,15 @@ impl FloatingButton {
         drag.set_button(gdk::BUTTON_PRIMARY);
         {
             let me = this.clone();
-            drag.connect_drag_update(move |g, dx, dy| me.on_drag(g, dx, dy));
+            drag.connect_drag_begin(move |_, sx, sy| me.on_drag_begin(sx, sy));
         }
         {
             let me = this.clone();
-            drag.connect_drag_end(move |g, dx, dy| me.on_drag_end(g, dx, dy));
+            drag.connect_drag_update(move |g, dx, dy| me.on_drag_update(g, dx, dy));
+        }
+        {
+            let me = this.clone();
+            drag.connect_drag_end(move |_, _, _| me.on_drag_end());
         }
         area.add_controller(drag);
 
@@ -178,12 +178,6 @@ impl FloatingButton {
 
     /// Re-reads size, colour and position after the settings changed.
     pub fn apply_config(&self) {
-        let button = self.app.config.borrow().button.clone();
-        if self.moving.borrow().is_none() {
-            self.window.set_margin(Edge::Bottom, button.margin_bottom);
-            self.window.set_margin(Edge::Right, button.margin_right);
-        }
-        self.resize();
         self.area.queue_draw();
     }
 
@@ -201,6 +195,17 @@ impl FloatingButton {
         self.disc() + 2.0 * PAD + COUNTER_H
     }
 
+    /// Top-left corner of the button box for a screen of `w` by `h`. The
+    /// position is stored as distances from the right and bottom edges, so
+    /// it survives resolution changes.
+    fn box_origin(&self, w: f64, h: f64) -> (f64, f64) {
+        let button = self.app.config.borrow().button.clone();
+        let (bw, bh) = (self.box_w(), self.box_h());
+        let x = (w - button.margin_right as f64 - bw).clamp(0.0, (w - bw).max(0.0));
+        let y = (h - button.margin_bottom as f64 - bh).clamp(0.0, (h - bh).max(0.0));
+        (x, y)
+    }
+
     fn bubble_visible(&self) -> bool {
         if self.live_text.borrow().is_empty() {
             return false;
@@ -211,95 +216,55 @@ impl FloatingButton {
         )
     }
 
-    fn resize(&self) {
-        if self.moving.borrow().is_some() {
-            return;
+    /// Only the button box takes clicks; the rest of the surface lets them
+    /// through to whatever is underneath.
+    fn set_input_region(&self, x: f64, y: f64, w: f64, h: f64) {
+        if let Some(surface) = self.window.surface() {
+            let rect = cairo::RectangleInt::new(x.floor() as i32, y.floor() as i32, w.ceil() as i32 + 1, h.ceil() as i32 + 1);
+            surface.set_input_region(Some(&cairo::Region::create_rectangle(&rect)));
         }
-        let extra = if self.bubble_visible() { BUBBLE_W + GAP } else { 0.0 };
-        self.area.set_content_width((self.box_w() + extra).ceil() as i32);
-        self.area.set_content_height(self.box_h().ceil() as i32);
     }
 
     // ------------------------------------------------------------- dragging
 
-    fn on_drag(&self, gesture: &gtk::GestureDrag, dx: f64, dy: f64) {
+    fn on_drag_begin(&self, sx: f64, sy: f64) {
+        let (ox, oy) = self.box_origin(self.area.width() as f64, self.area.height() as f64);
+        self.drag.set(Some(Drag { grab_x: sx - ox, grab_y: sy - oy, active: false }));
+    }
+
+    fn on_drag_update(&self, gesture: &gtk::GestureDrag, dx: f64, dy: f64) {
+        let Some(mut drag) = self.drag.get() else { return };
         let Some((sx, sy)) = gesture.start_point() else { return };
-        if self.moving.borrow().is_none() {
+        if !drag.active {
             if dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD {
                 return;
             }
             if !matches!(&*self.state.borrow(), State::Idle | State::Done { .. }) {
                 return;
             }
-            // Cover the whole screen with the surface and draw the button
-            // wherever the pointer goes. Layer surfaces cannot be moved, but
-            // a full-screen one can draw anywhere. Anchoring to all four
-            // edges lets the compositor pick the size; the window has to be
-            // resizable for GTK to accept it.
-            let box_x = self.area.width() as f64 - self.box_w();
-            let button = self.app.config.borrow().button.clone();
-            *self.moving.borrow_mut() = Some(Move {
-                grab_x: sx - box_x,
-                grab_y: sy,
-                small_w: self.area.width(),
-                right: button.margin_right,
-                bottom: button.margin_bottom,
-                pos: None,
-            });
-            self.area.set_content_width(1);
-            self.area.set_content_height(1);
-            self.window.set_resizable(true);
-            for edge in [Edge::Left, Edge::Top, Edge::Right, Edge::Bottom] {
-                self.window.set_margin(edge, 0);
-                self.window.set_anchor(edge, true);
-            }
-            return;
+            drag.active = true;
         }
-        // Once the surface covers the screen, start point plus offset is the
-        // pointer in screen coordinates. Until it has grown, events still
-        // come in the old coordinates and are ignored.
-        let mut moving = self.moving.borrow_mut();
-        let Some(m) = moving.as_mut() else { return };
-        if self.area.width() <= m.small_w {
-            return;
+        let (w, h) = (self.area.width() as f64, self.area.height() as f64);
+        let (bw, bh) = (self.box_w(), self.box_h());
+        let x = (sx + dx - drag.grab_x).clamp(0.0, (w - bw).max(0.0));
+        let y = (sy + dy - drag.grab_y).clamp(0.0, (h - bh).max(0.0));
+        {
+            let mut config = self.app.config.borrow_mut();
+            config.button.margin_right = (w - (x + bw)).round() as i32;
+            config.button.margin_bottom = (h - (y + bh)).round() as i32;
         }
-        m.pos = Some((sx + dx - m.grab_x, sy + dy - m.grab_y));
-        drop(moving);
+        self.drag.set(Some(drag));
         self.area.queue_draw();
     }
 
-    fn on_drag_end(&self, _gesture: &gtk::GestureDrag, _dx: f64, _dy: f64) {
-        let Some(m) = self.moving.borrow_mut().take() else { return };
-        let (screen_w, screen_h) = (self.area.width() as f64, self.area.height() as f64);
-        let (bw, bh) = (self.box_w(), self.box_h());
-        let (right, bottom) = match m.pos {
-            Some((x, y)) if self.area.width() > m.small_w => {
-                let x = x.clamp(0.0, (screen_w - bw).max(0.0));
-                let y = y.clamp(0.0, (screen_h - bh).max(0.0));
-                (
-                    (screen_w - (x + bw)).round().max(0.0) as i32,
-                    (screen_h - (y + bh)).round().max(0.0) as i32,
-                )
-            }
-            // Released before the surface grew: leave it where it was.
-            _ => (m.right, m.bottom),
-        };
-
-        for edge in [Edge::Left, Edge::Top] {
-            self.window.set_anchor(edge, false);
+    fn on_drag_end(&self) {
+        let Some(drag) = self.drag.take() else { return };
+        if !drag.active {
+            return;
         }
-        self.window.set_margin(Edge::Right, right);
-        self.window.set_margin(Edge::Bottom, bottom);
-        self.window.set_resizable(false);
-        self.resize();
         self.moved_at.set(Some(Instant::now()));
-        {
-            let mut config = self.app.config.borrow_mut();
-            config.button.margin_right = right;
-            config.button.margin_bottom = bottom;
-            if let Err(err) = config.save() {
-                log::warn!("could not save the position: {err:#}");
-            }
+        if let Err(err) = self.app.config.borrow().save() {
+            log::warn!("could not save the position: {err:#}");
         }
         self.area.queue_draw();
     }
@@ -338,7 +303,6 @@ impl FloatingButton {
             }
             Err(err) => notify(&format!("{err:#}")),
         }
-        self.resize();
         self.area.queue_draw();
     }
 
@@ -366,7 +330,6 @@ impl FloatingButton {
             *self.state.borrow_mut() = State::Transcribing { result: rx };
         }
         self.start_ticker();
-        self.resize();
         self.area.queue_draw();
     }
 
@@ -504,7 +467,6 @@ impl FloatingButton {
         if let Some(message) = warning {
             notify(&message);
         }
-        self.resize();
         self.area.queue_draw();
         !finished
     }
@@ -546,25 +508,19 @@ impl FloatingButton {
     fn draw(&self, cr: &cairo::Context, w: f64, h: f64) {
         let s = self.disc();
         let (bw, bh) = (self.box_w(), self.box_h());
-        let moving = self.moving.borrow();
-        let (ox, oy) = match moving.as_ref() {
-            Some(Move { pos: Some(p), .. }) => *p,
-            // Growing to full screen but the pointer has not spoken yet: keep
-            // the box where it was, so nothing flashes in a corner.
-            Some(m) if w > m.small_w as f64 + 0.5 => (w - m.right as f64 - bw, h - m.bottom as f64 - bh),
-            _ => (w - bw, 0.0),
-        };
+        let (ox, oy) = self.box_origin(w, h);
         let cx = ox + bw / 2.0;
         let cy = oy + PAD + s / 2.0;
 
         let state = self.state.borrow();
         let recording = matches!(&*state, State::Recording { .. });
         let busy = matches!(&*state, State::Transcribing { .. } | State::Finishing { .. });
-        let done = matches!(&*state, State::Done { .. });
         let (ar, ag, ab) = config::rgb(&self.app.config.borrow().button.color);
 
-        if moving.is_none() && self.bubble_visible() {
-            self.draw_bubble(cr, ox - GAP - BUBBLE_W, oy + PAD + s, &self.live_text.borrow());
+        if self.bubble_visible() {
+            // Beside the disc, on whichever side has room.
+            let bx = if ox - GAP - BUBBLE_W >= 0.0 { ox - GAP - BUBBLE_W } else { ox + bw + GAP };
+            self.draw_bubble(cr, bx, oy + PAD + s, &self.live_text.borrow());
         }
 
         // Shadow: a few soft rings instead of a blur.
@@ -608,20 +564,20 @@ impl FloatingButton {
             let _ = cr.stroke();
         }
 
-        if moving.is_none() {
-            let label = match &*state {
-                State::Recording { started, .. } => {
-                    let secs = started.elapsed().as_secs();
-                    format!("{}:{:02}", secs / 60, secs % 60)
-                }
-                State::Transcribing { .. } | State::Finishing { .. } => "···".to_string(),
-                State::Done { .. } if done => "✓".to_string(),
-                _ => String::new(),
-            };
-            if !label.is_empty() {
-                draw_counter(cr, &label, cx, oy + bh - COUNTER_H + 2.0, recording, (ar, ag, ab));
+        let label = match &*state {
+            State::Recording { started, .. } => {
+                let secs = started.elapsed().as_secs();
+                format!("{}:{:02}", secs / 60, secs % 60)
             }
+            State::Transcribing { .. } | State::Finishing { .. } => "···".to_string(),
+            State::Done { .. } => "✓".to_string(),
+            State::Idle => String::new(),
+        };
+        if !label.is_empty() {
+            draw_counter(cr, &label, cx, oy + bh - COUNTER_H + 2.0);
         }
+
+        self.set_input_region(ox, oy, bw, bh);
     }
 
     fn draw_bubble(&self, cr: &cairo::Context, x: f64, bottom: f64, text: &str) {
@@ -689,25 +645,20 @@ fn draw_bars(cr: &cairo::Context, cx: f64, cy: f64, s: f64, bars: &[f32; 5]) {
     }
 }
 
-fn draw_counter(cr: &cairo::Context, text: &str, cx: f64, y: f64, recording: bool, accent: (f64, f64, f64)) {
+fn draw_counter(cr: &cairo::Context, text: &str, cx: f64, y: f64) {
     let layout = pangocairo::functions::create_layout(cr);
     layout.set_font_description(Some(&pango::FontDescription::from_string("Monospace Bold 10")));
     layout.set_text(text);
     let (tw, _) = layout.pixel_size();
     let x = cx - tw as f64 / 2.0;
     // A dark halo first, so the digits read on any wallpaper.
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.55);
     for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (0.0, 2.0)] {
         cr.move_to(x + dx, y + dy);
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.55);
         pangocairo::functions::show_layout(cr, &layout);
     }
+    cr.set_source_rgb(1.0, 1.0, 1.0);
     cr.move_to(x, y);
-    if recording {
-        cr.set_source_rgb(1.0, 1.0, 1.0);
-    } else {
-        cr.set_source_rgb(1.0, 1.0, 1.0);
-    }
-    let _ = accent;
     pangocairo::functions::show_layout(cr, &layout);
 }
 
@@ -738,7 +689,6 @@ fn menu() -> gio::Menu {
     look.append_submenu(Some("Recording color"), &color);
 
     let system = gio::Menu::new();
-    system.append(Some("Start at login"), Some("app.autostart"));
     system.append(Some("Settings…"), Some("app.settings"));
 
     let quit = gio::Menu::new();
@@ -755,7 +705,6 @@ fn menu() -> gio::Menu {
 /// freezes the button.
 pub fn notify(message: &str) {
     let body = message.to_string();
-    log::info!("{body}");
     std::thread::spawn(move || {
         let _ = notify_rust::Notification::new()
             .summary("Abla")

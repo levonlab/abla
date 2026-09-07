@@ -12,7 +12,6 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use crate::config::Config;
-use crate::desktop;
 use button::FloatingButton;
 
 pub const APP_ID: &str = "io.github.levongabrielyan.abla";
@@ -153,9 +152,6 @@ impl App {
         if let Some(action) = self.gtk.lookup_action("color").and_downcast::<gio::SimpleAction>() {
             action.set_state(&config.button.color.to_variant());
         }
-        if let Some(action) = self.gtk.lookup_action("autostart").and_downcast::<gio::SimpleAction>() {
-            action.set_state(&desktop::autostart_enabled().to_variant());
-        }
     }
 }
 
@@ -225,21 +221,4 @@ fn register_actions(app: &Rc<App>) {
         });
     }
     app.gtk.add_action(&color);
-
-    let autostart = gio::SimpleAction::new_stateful("autostart", None, &desktop::autostart_enabled().to_variant());
-    {
-        let app = app.clone();
-        autostart.connect_activate(move |action, _| {
-            let on = !action.state().and_then(|s| s.get::<bool>()).unwrap_or(false);
-            match desktop::set_autostart(on) {
-                Ok(()) => {
-                    action.set_state(&on.to_variant());
-                    app.config.borrow_mut().general.autostart = on;
-                    app.save_config();
-                }
-                Err(err) => button::notify(&format!("Could not change autostart: {err:#}")),
-            }
-        });
-    }
-    app.gtk.add_action(&autostart);
 }
