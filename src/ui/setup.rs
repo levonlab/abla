@@ -39,8 +39,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let window = gtk::Window::builder()
         .application(app)
         .title("Abla")
-        .default_width(500)
-        .resizable(false)
+        .default_width(520)
         .build();
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 16);
@@ -93,10 +92,23 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     grid.attach(&base_label, 0, 1, 1, 1);
     grid.attach(&base_url, 1, 1, 1, 1);
 
-    // API key
+    // API key. An ABLA_API_KEY in the environment counts as a key without
+    // ever being written to the file.
+    let env_key = std::env::var("ABLA_API_KEY").ok().filter(|k| !k.trim().is_empty());
     let key = gtk::PasswordEntry::new();
     key.set_show_peek_icon(true);
     key.set_text(&config.provider.api_key);
+    if env_key.is_some() && config.provider.api_key.is_empty() {
+        key.set_placeholder_text(Some("Using ABLA_API_KEY from the environment"));
+    }
+    let effective_key = {
+        let key = key.clone();
+        let env_key = env_key.clone();
+        move || {
+            let typed = key.text().trim().to_string();
+            if typed.is_empty() { env_key.clone().unwrap_or_default() } else { typed }
+        }
+    };
     grid.attach(&field_label("API key"), 0, 2, 1, 1);
     grid.attach(&key, 1, 2, 1, 1);
 
@@ -177,9 +189,9 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     let refresh_save = {
         let save = save.clone();
-        let key = key.clone();
+        let effective_key = effective_key.clone();
         let models = models.clone();
-        move || save.set_sensitive(!key.text().trim().is_empty() && !models.borrow().is_empty())
+        move || save.set_sensitive(!effective_key().is_empty() && !models.borrow().is_empty())
     };
 
     let apply_provider = {
@@ -245,7 +257,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     }
 
     {
-        let key = key.clone();
+        let effective_key = effective_key.clone();
         let base_url = base_url.clone();
         let provider = provider.clone();
         let spinner = spinner.clone();
@@ -257,7 +269,7 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let saved_model = config.provider.model.clone();
         connect.connect_clicked(move |button| {
             let kind = ALL[provider.selected() as usize];
-            let api_key = key.text().trim().to_string();
+            let api_key = effective_key();
             if api_key.is_empty() {
                 status.set_text("Paste an API key first.");
                 return;
@@ -357,6 +369,10 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     spinner.set_visible(false);
     window.present();
+    // With a key at hand, fetch today's model list straight away.
+    if !effective_key().is_empty() {
+        connect.emit_clicked();
+    }
 }
 
 fn model_label(model: &Model) -> String {

@@ -64,9 +64,13 @@ struct Move {
     /// Where inside the button box the pointer grabbed it.
     grab_x: f64,
     grab_y: f64,
-    /// Current top-left corner of the box, in screen coordinates.
-    x: f64,
-    y: f64,
+    /// Width of the surface before it grew to cover the screen.
+    small_w: i32,
+    /// Where the box was, as margins, until the pointer says otherwise.
+    right: i32,
+    bottom: i32,
+    /// Top-left corner of the box in screen coordinates, once known.
+    pos: Option<(f64, f64)>,
 }
 
 pub struct FloatingButton {
@@ -229,31 +233,38 @@ impl FloatingButton {
             }
             // Cover the whole screen with the surface and draw the button
             // wherever the pointer goes. Layer surfaces cannot be moved, but
-            // a full-screen one can draw anywhere.
+            // a full-screen one can draw anywhere. Anchoring to all four
+            // edges lets the compositor pick the size; the window has to be
+            // resizable for GTK to accept it.
             let box_x = self.area.width() as f64 - self.box_w();
+            let button = self.app.config.borrow().button.clone();
             *self.moving.borrow_mut() = Some(Move {
                 grab_x: sx - box_x,
                 grab_y: sy,
-                x: box_x + dx,
-                y: dy,
+                small_w: self.area.width(),
+                right: button.margin_right,
+                bottom: button.margin_bottom,
+                pos: None,
             });
-            for edge in [Edge::Left, Edge::Top] {
-                self.window.set_anchor(edge, true);
-            }
-            for edge in [Edge::Left, Edge::Top, Edge::Right, Edge::Bottom] {
-                self.window.set_margin(edge, 0);
-            }
             self.area.set_content_width(1);
             self.area.set_content_height(1);
+            self.window.set_resizable(true);
+            for edge in [Edge::Left, Edge::Top, Edge::Right, Edge::Bottom] {
+                self.window.set_margin(edge, 0);
+                self.window.set_anchor(edge, true);
+            }
             return;
         }
         // Once the surface covers the screen, start point plus offset is the
-        // pointer in screen coordinates.
-        let (px, py) = (sx + dx, sy + dy);
-        if let Some(m) = self.moving.borrow_mut().as_mut() {
-            m.x = px - m.grab_x;
-            m.y = py - m.grab_y;
+        // pointer in screen coordinates. Until it has grown, events still
+        // come in the old coordinates and are ignored.
+        let mut moving = self.moving.borrow_mut();
+        let Some(m) = moving.as_mut() else { return };
+        if self.area.width() <= m.small_w {
+            return;
         }
+        m.pos = Some((sx + dx - m.grab_x, sy + dy - m.grab_y));
+        drop(moving);
         self.area.queue_draw();
     }
 
@@ -261,16 +272,25 @@ impl FloatingButton {
         let Some(m) = self.moving.borrow_mut().take() else { return };
         let (screen_w, screen_h) = (self.area.width() as f64, self.area.height() as f64);
         let (bw, bh) = (self.box_w(), self.box_h());
-        let x = m.x.clamp(0.0, (screen_w - bw).max(0.0));
-        let y = m.y.clamp(0.0, (screen_h - bh).max(0.0));
-        let right = (screen_w - (x + bw)).round().max(0.0) as i32;
-        let bottom = (screen_h - (y + bh)).round().max(0.0) as i32;
+        let (right, bottom) = match m.pos {
+            Some((x, y)) if self.area.width() > m.small_w => {
+                let x = x.clamp(0.0, (screen_w - bw).max(0.0));
+                let y = y.clamp(0.0, (screen_h - bh).max(0.0));
+                (
+                    (screen_w - (x + bw)).round().max(0.0) as i32,
+                    (screen_h - (y + bh)).round().max(0.0) as i32,
+                )
+            }
+            // Released before the surface grew: leave it where it was.
+            _ => (m.right, m.bottom),
+        };
 
         for edge in [Edge::Left, Edge::Top] {
             self.window.set_anchor(edge, false);
         }
         self.window.set_margin(Edge::Right, right);
         self.window.set_margin(Edge::Bottom, bottom);
+        self.window.set_resizable(false);
         self.resize();
         self.moved_at.set(Some(Instant::now()));
         {
@@ -523,13 +543,16 @@ impl FloatingButton {
 
     // -------------------------------------------------------------- drawing
 
-    fn draw(&self, cr: &cairo::Context, w: f64, _h: f64) {
+    fn draw(&self, cr: &cairo::Context, w: f64, h: f64) {
         let s = self.disc();
         let (bw, bh) = (self.box_w(), self.box_h());
         let moving = self.moving.borrow();
         let (ox, oy) = match moving.as_ref() {
-            Some(m) => (m.x, m.y),
-            None => (w - bw, 0.0),
+            Some(Move { pos: Some(p), .. }) => *p,
+            // Growing to full screen but the pointer has not spoken yet: keep
+            // the box where it was, so nothing flashes in a corner.
+            Some(m) if w > m.small_w as f64 + 0.5 => (w - m.right as f64 - bw, h - m.bottom as f64 - bh),
+            _ => (w - bw, 0.0),
         };
         let cx = ox + bw / 2.0;
         let cy = oy + PAD + s / 2.0;
@@ -712,7 +735,7 @@ fn menu() -> gio::Menu {
     }
     let look = gio::Menu::new();
     look.append_submenu(Some("Size"), &size);
-    look.append_submenu(Some("Color"), &color);
+    look.append_submenu(Some("Recording color"), &color);
 
     let system = gio::Menu::new();
     system.append(Some("Start at login"), Some("app.autostart"));

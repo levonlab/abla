@@ -34,17 +34,17 @@ pub struct App {
 }
 
 pub fn run(start: Start) -> Result<i32> {
-    let gtk_app = gtk::Application::builder().application_id(APP_ID).build();
-    gtk_app.register(None::<&gio::Cancellable>)?;
-    if gtk_app.is_remote() {
-        // Another abla owns the name: hand it the request and leave.
-        match start {
-            Start::Settings => gtk_app.activate_action("settings", None),
-            Start::Button => gtk_app.activate_action("show", None),
-        }
-        flush(&gtk_app);
+    // Another abla may own the name already: hand it the request and leave.
+    let action = match start {
+        Start::Settings => "settings",
+        Start::Button => "show",
+    };
+    if send_action(action)? {
         return Ok(0);
     }
+
+    let gtk_app = gtk::Application::builder().application_id(APP_ID).build();
+    gtk_app.register(None::<&gio::Cancellable>)?;
 
     let provider = gtk::CssProvider::new();
     provider.load_from_data(CSS);
@@ -73,14 +73,22 @@ pub fn run(start: Start) -> Result<i32> {
 
 /// `abla toggle`: asks the running instance to start or stop dictation.
 pub fn send_toggle() -> Result<()> {
+    if !send_action("toggle")? {
+        anyhow::bail!("abla is not running. Start it from the application menu, or run `abla`.");
+    }
+    Ok(())
+}
+
+/// Delivers an action to a running abla. Returns false when there is none.
+fn send_action(name: &str) -> Result<bool> {
     let app = gio::Application::new(Some(APP_ID), gio::ApplicationFlags::empty());
     app.register(None::<&gio::Cancellable>)?;
     if !app.is_remote() {
-        anyhow::bail!("abla is not running. Start it from the application menu, or run `abla`.");
+        return Ok(false);
     }
-    app.activate_action("toggle", None);
+    app.activate_action(name, None);
     flush(&app);
-    Ok(())
+    Ok(true)
 }
 
 /// Makes sure a remote action call has left the process before it exits.
