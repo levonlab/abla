@@ -58,7 +58,12 @@ impl Recorder {
                 })
                 .context("could not start the capture thread")?
         };
-        Ok(Recorder { child, pcm, level, reader: Some(reader) })
+        Ok(Recorder {
+            child,
+            pcm,
+            level,
+            reader: Some(reader),
+        })
     }
 
     /// Peak amplitude of the most recent chunk, 0..1.
@@ -130,7 +135,12 @@ pub fn pcm_from_wav(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut pos = 12;
     while pos + 8 <= bytes.len() {
         let id = &bytes[pos..pos + 4];
-        let len = u32::from_le_bytes([bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]]) as usize;
+        let len = u32::from_le_bytes([
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]) as usize;
         let start = pos + 8;
         if id == b"data" {
             let end = (start + len).min(bytes.len());
@@ -150,7 +160,10 @@ mod tests {
         assert_eq!(peak(&[0, 0, 0, 0]), 0.0);
         assert_eq!(peak(&i16::MIN.to_le_bytes()), 1.0);
         let half = (16384i16).to_le_bytes();
-        assert!((peak(&half) - 1.0).abs() < 1e-6, "half scale is boosted to the top");
+        assert!(
+            (peak(&half) - 1.0).abs() < 1e-6,
+            "half scale is boosted to the top"
+        );
     }
 
     #[test]

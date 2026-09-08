@@ -28,11 +28,17 @@ pub fn batch(provider: &config::Provider, api_key: &str, wav: Vec<u8>) -> Result
     let mut response = agent
         .post(format!("{base}/audio/transcriptions"))
         .header("Authorization", &format!("Bearer {}", api_key.trim()))
-        .header("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+        .header(
+            "Content-Type",
+            &format!("multipart/form-data; boundary={boundary}"),
+        )
         .send(&body[..])
         .context("could not reach the provider")?;
     let status = response.status().as_u16();
-    let text = response.body_mut().read_to_string().context("could not read the answer")?;
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .context("could not read the answer")?;
     let json: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     match status {
         200..=299 => {}
@@ -54,7 +60,8 @@ pub fn multipart(boundary: &str, model: &str, language: &str, wav: &[u8]) -> Vec
     let mut field = |name: &str, value: &str| {
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
         body.extend_from_slice(
-            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes(),
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+                .as_bytes(),
         );
     };
     field("model", model);
@@ -86,9 +93,13 @@ mod tests {
     fn multipart_has_every_part_in_order() {
         let body = multipart("B", "voxtral-mini-latest", "es", b"RIFFdata");
         let text = String::from_utf8_lossy(&body);
-        let model = text.find("name=\"model\"\r\n\r\nvoxtral-mini-latest").unwrap();
+        let model = text
+            .find("name=\"model\"\r\n\r\nvoxtral-mini-latest")
+            .unwrap();
         let lang = text.find("name=\"language\"\r\n\r\nes").unwrap();
-        let file = text.find("filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFFdata").unwrap();
+        let file = text
+            .find("filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFFdata")
+            .unwrap();
         assert!(model < lang && lang < file);
         assert!(text.ends_with("\r\n--B--\r\n"));
     }

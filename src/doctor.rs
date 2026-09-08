@@ -64,11 +64,19 @@ pub fn run() -> ExitCode {
     let config = match Config::load() {
         Ok(Some(c)) => c,
         Ok(None) => {
-            r.fail("Config", "not set up yet", "Run `abla` once, or `abla setup`, to choose a provider and paste your key.");
+            r.fail(
+                "Config",
+                "not set up yet",
+                "Run `abla` once, or `abla setup`, to choose a provider and paste your key.",
+            );
             return finish(r);
         }
         Err(err) => {
-            r.fail("Config", &format!("{err:#}"), &format!("Fix or delete {}", Config::path().display()));
+            r.fail(
+                "Config",
+                &format!("{err:#}"),
+                &format!("Fix or delete {}", Config::path().display()),
+            );
             return finish(r);
         }
     };
@@ -79,13 +87,25 @@ pub fn run() -> ExitCode {
             "{} — {}, {}{}",
             Config::path().display(),
             kind.label(),
-            if config.provider.model.is_empty() { "no model" } else { &config.provider.model },
-            if config.provider.realtime { " (live)" } else { "" }
+            if config.provider.model.is_empty() {
+                "no model"
+            } else {
+                &config.provider.model
+            },
+            if config.provider.realtime {
+                " (live)"
+            } else {
+                ""
+            }
         ),
     );
     let key = config.api_key();
     if key.is_empty() {
-        r.fail("Provider", "no API key", "Run `abla setup` and paste a key, or set ABLA_API_KEY.");
+        r.fail(
+            "Provider",
+            "no API key",
+            "Run `abla setup` and paste a key, or set ABLA_API_KEY.",
+        );
         return finish(r);
     }
     match providers::list_models(kind, &config.provider.base_url, &key) {
@@ -93,16 +113,29 @@ pub fn run() -> ExitCode {
             let n = models.len();
             let known = models.iter().any(|m| m.id == config.provider.model);
             if known || config.provider.model.is_empty() {
-                r.ok("Provider", &format!("key accepted, {n} transcription model{}", if n == 1 { "" } else { "s" }));
+                r.ok(
+                    "Provider",
+                    &format!(
+                        "key accepted, {n} transcription model{}",
+                        if n == 1 { "" } else { "s" }
+                    ),
+                );
             } else {
                 r.warn(
                     "Provider",
-                    &format!("key accepted, but {} is not in the list of {n}", config.provider.model),
+                    &format!(
+                        "key accepted, but {} is not in the list of {n}",
+                        config.provider.model
+                    ),
                     "Run `abla setup` and pick a model again.",
                 );
             }
         }
-        Err(err) => r.fail("Provider", &format!("{err:#}"), "Check the key and the base URL in `abla setup`."),
+        Err(err) => r.fail(
+            "Provider",
+            &format!("{err:#}"),
+            "Check the key and the base URL in `abla setup`.",
+        ),
     }
     finish(r)
 }

@@ -52,7 +52,11 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     root.set_margin_end(28);
     window.set_child(Some(&root));
 
-    let title = gtk::Label::new(Some(if config.is_ready() { "Abla settings" } else { "Set up Abla" }));
+    let title = gtk::Label::new(Some(if config.is_ready() {
+        "Abla settings"
+    } else {
+        "Set up Abla"
+    }));
     title.add_css_class("title-2");
     title.set_xalign(0.0);
     root.append(&title);
@@ -97,7 +101,9 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
 
     // API key. An ABLA_API_KEY in the environment counts as a key without
     // ever being written to the file.
-    let env_key = std::env::var("ABLA_API_KEY").ok().filter(|k| !k.trim().is_empty());
+    let env_key = std::env::var("ABLA_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty());
     let key = gtk::PasswordEntry::new();
     key.set_show_peek_icon(true);
     key.set_text(&config.provider.api_key);
@@ -140,7 +146,10 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let models: Rc<RefCell<Vec<Model>>> = Rc::new(RefCell::new(Vec::new()));
     let models_kind = Rc::new(Cell::new(saved_kind));
     if !config.provider.model.is_empty() {
-        models.borrow_mut().push(Model { id: config.provider.model.clone(), realtime: config.provider.realtime });
+        models.borrow_mut().push(Model {
+            id: config.provider.model.clone(),
+            realtime: config.provider.realtime,
+        });
         model_list.append(&model_label(&models.borrow()[0]));
     }
     model.set_sensitive(!models.borrow().is_empty());
@@ -157,7 +166,10 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let language_labels: Vec<&str> = LANGUAGES.iter().map(|(l, _)| *l).collect();
     let language = gtk::DropDown::from_strings(&language_labels);
     language.set_selected(
-        LANGUAGES.iter().position(|(_, code)| *code == config.provider.language).unwrap_or(0) as u32,
+        LANGUAGES
+            .iter()
+            .position(|(_, code)| *code == config.provider.language)
+            .unwrap_or(0) as u32,
     );
     grid.attach(&field_label("Language"), 0, 7, 1, 1);
     grid.attach(&language, 1, 7, 1, 1);
@@ -185,7 +197,11 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let env_key = env_key.clone();
         move || {
             let typed = key.text().trim().to_string();
-            if typed.is_empty() { env_key.clone().unwrap_or_default() } else { typed }
+            if typed.is_empty() {
+                env_key.clone().unwrap_or_default()
+            } else {
+                typed
+            }
         }
     };
 
@@ -205,7 +221,11 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
     let saved_target: Target = (
         saved_kind,
         normalize_base_url(&config.provider.base_url).unwrap_or_default(),
-        if config.provider.api_key.is_empty() { env_key.clone().unwrap_or_default() } else { config.provider.api_key.clone() },
+        if config.provider.api_key.is_empty() {
+            env_key.clone().unwrap_or_default()
+        } else {
+            config.provider.api_key.clone()
+        },
     );
     // The last provider and key the provider accepted, and the last it refused.
     let last_good: Rc<RefCell<Option<Target>>> = Rc::new(RefCell::new(None));
@@ -240,7 +260,11 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             status.remove_css_class("success");
             status.remove_css_class("error");
             let good = last_good.borrow().as_ref() == Some(&target);
-            let bad = last_bad.borrow().as_ref().filter(|(t, _)| *t == target).map(|(_, e)| e.clone());
+            let bad = last_bad
+                .borrow()
+                .as_ref()
+                .filter(|(t, _)| *t == target)
+                .map(|(_, e)| e.clone());
             if good {
                 status.set_text("✓ Connected");
                 status.add_css_class("success");
@@ -252,7 +276,8 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                 status.add_css_class("error");
                 connect.set_visible(true);
                 change_key.set_visible(false);
-                restore_key.set_visible(last_good.borrow().as_ref().is_some_and(|g| g.0 == target.0));
+                restore_key
+                    .set_visible(last_good.borrow().as_ref().is_some_and(|g| g.0 == target.0));
             } else {
                 status.set_text("");
                 connect.set_visible(true);
@@ -319,7 +344,10 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                 base_url.set_text(&remembered.base_url);
             }
             if !remembered.model.is_empty() {
-                let known = Model { id: remembered.model.clone(), realtime: remembered.realtime };
+                let known = Model {
+                    id: remembered.model.clone(),
+                    realtime: remembered.realtime,
+                };
                 model_list.append(&model_label(&known));
                 models.borrow_mut().push(known);
                 model.set_selected(0);
@@ -361,12 +389,18 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
         let last_good = last_good.clone();
         let env_key = env_key.clone();
         restore_key.connect_clicked(move |_| {
-            let Some((kind, base, good_key)) = last_good.borrow().clone() else { return };
+            let Some((kind, base, good_key)) = last_good.borrow().clone() else {
+                return;
+            };
             if kind == Kind::Custom {
                 base_url.set_text(&base);
             }
             // A key that came from the environment is restored by clearing the field.
-            key.set_text(if env_key.as_deref() == Some(good_key.as_str()) { "" } else { &good_key });
+            key.set_text(if env_key.as_deref() == Some(good_key.as_str()) {
+                ""
+            } else {
+                &good_key
+            });
         });
     }
 
@@ -418,8 +452,12 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
             glib::timeout_add_local(Duration::from_millis(80), move || {
                 let result = match rx.try_recv() {
                     Ok(result) => result,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(anyhow::anyhow!("the request was interrupted")),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        return glib::ControlFlow::Continue;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        Err(anyhow::anyhow!("the request was interrupted"))
+                    }
                 };
                 spinner.stop();
                 spinner.set_visible(false);
@@ -435,12 +473,17 @@ pub fn show(app: &gtk::Application, config: Config, on_saved: impl Fn(Config) + 
                         model.set_selected(selected as u32);
                         model.set_sensitive(true);
                         *last_good.borrow_mut() = Some(target.clone());
-                        if last_bad.borrow().as_ref().is_some_and(|(t, _)| *t == target) {
+                        if last_bad
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|(t, _)| *t == target)
+                        {
                             *last_bad.borrow_mut() = None;
                         }
                     }
                     Err(err) => {
-                        *last_bad.borrow_mut() = Some((target.clone(), capitalize(&format!("{err:#}"))));
+                        *last_bad.borrow_mut() =
+                            Some((target.clone(), capitalize(&format!("{err:#}"))));
                     }
                 }
                 refresh_save();

@@ -141,7 +141,10 @@ impl FloatingButton {
             let me = this.clone();
             click.connect_released(move |_, _, _, _| {
                 let dragging = me.drag.get().is_some_and(|d| d.active);
-                let just_moved = me.moved_at.get().is_some_and(|t| t.elapsed() < Duration::from_millis(300));
+                let just_moved = me
+                    .moved_at
+                    .get()
+                    .is_some_and(|t| t.elapsed() < Duration::from_millis(300));
                 if !dragging && !just_moved {
                     me.toggle();
                 }
@@ -154,7 +157,8 @@ impl FloatingButton {
         {
             let me = this.clone();
             secondary.connect_pressed(move |_, _, x, y| {
-                me.popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                me.popover
+                    .set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
                 me.popover.popup();
             });
         }
@@ -224,7 +228,12 @@ impl FloatingButton {
     /// through to whatever is underneath.
     fn set_input_region(&self, x: f64, y: f64, w: f64, h: f64) {
         if let Some(surface) = self.window.surface() {
-            let rect = cairo::RectangleInt::new(x.floor() as i32, y.floor() as i32, w.ceil() as i32 + 1, h.ceil() as i32 + 1);
+            let rect = cairo::RectangleInt::new(
+                x.floor() as i32,
+                y.floor() as i32,
+                w.ceil() as i32 + 1,
+                h.ceil() as i32 + 1,
+            );
             surface.set_input_region(Some(&cairo::Region::create_rectangle(&rect)));
         }
     }
@@ -233,12 +242,20 @@ impl FloatingButton {
 
     fn on_drag_begin(&self, sx: f64, sy: f64) {
         let (ox, oy) = self.box_origin(self.area.width() as f64, self.area.height() as f64);
-        self.drag.set(Some(Drag { grab_x: sx - ox, grab_y: sy - oy, active: false }));
+        self.drag.set(Some(Drag {
+            grab_x: sx - ox,
+            grab_y: sy - oy,
+            active: false,
+        }));
     }
 
     fn on_drag_update(&self, gesture: &gtk::GestureDrag, dx: f64, dy: f64) {
-        let Some(mut drag) = self.drag.get() else { return };
-        let Some((sx, sy)) = gesture.start_point() else { return };
+        let Some(mut drag) = self.drag.get() else {
+            return;
+        };
+        let Some((sx, sy)) = gesture.start_point() else {
+            return;
+        };
         if !drag.active {
             if dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD {
                 return;
@@ -293,7 +310,10 @@ impl FloatingButton {
         }
         let (live_tx, live) = if config.provider.realtime {
             let (tx, rx) = channel();
-            (Some(tx), Some(realtime::start(&config.provider, &config.api_key(), rx)))
+            (
+                Some(tx),
+                Some(realtime::start(&config.provider, &config.api_key(), rx)),
+            )
         } else {
             (None, None)
         };
@@ -303,7 +323,11 @@ impl FloatingButton {
                 self.live_start.set(0);
                 self.level.set(0.0);
                 *self.bars.borrow_mut() = [0.0; 5];
-                *self.state.borrow_mut() = State::Recording { recorder, started: Instant::now(), live };
+                *self.state.borrow_mut() = State::Recording {
+                    recorder,
+                    started: Instant::now(),
+                    live,
+                };
                 self.start_ticker();
             }
             Err(err) => notify(&format!("{err:#}")),
@@ -313,14 +337,19 @@ impl FloatingButton {
 
     fn stop_recording(self: &Rc<Self>) {
         let previous = std::mem::replace(&mut *self.state.borrow_mut(), State::Idle);
-        let State::Recording { recorder, live, .. } = previous else { return };
+        let State::Recording { recorder, live, .. } = previous else {
+            return;
+        };
         // Dropping the recorder's sender tells a live session the audio ended.
         let pcm = recorder.stop();
         let seconds = pcm.len() as f32 / audio::BYTES_PER_SECOND as f32;
         if seconds < 0.4 {
             notify("Nothing was recorded.");
         } else if let Some(live) = live {
-            *self.state.borrow_mut() = State::Finishing { started: Instant::now(), live };
+            *self.state.borrow_mut() = State::Finishing {
+                started: Instant::now(),
+                live,
+            };
         } else {
             let config = self.app.config.borrow().clone();
             let key = config.api_key();
@@ -363,10 +392,15 @@ impl FloatingButton {
         {
             let mut state = self.state.borrow_mut();
             match &mut *state {
-                State::Recording { recorder, started, live } => {
+                State::Recording {
+                    recorder,
+                    started,
+                    live,
+                } => {
                     let target = recorder.level();
                     let current = self.level.get();
-                    let mut next = current + (target - current) * if target > current { 0.55 } else { 0.18 };
+                    let mut next =
+                        current + (target - current) * if target > current { 0.55 } else { 0.18 };
                     if next < 0.01 {
                         next = 0.0;
                     }
@@ -381,7 +415,9 @@ impl FloatingButton {
                         let mut drop_live = false;
                         loop {
                             match session.events.try_recv() {
-                                Ok(realtime::Event::Delta(text)) => self.live_text.borrow_mut().push_str(&text),
+                                Ok(realtime::Event::Delta(text)) => {
+                                    self.live_text.borrow_mut().push_str(&text)
+                                }
                                 Ok(realtime::Event::Error(e)) => {
                                     warning = Some(format!("Live transcription stopped: {e}"));
                                     drop_live = true;
@@ -405,7 +441,9 @@ impl FloatingButton {
                     match result.try_recv() {
                         Ok(Ok(text)) => deliver = Some(text),
                         Ok(Err(e)) => error = Some(format!("{e:#}")),
-                        Err(TryRecvError::Disconnected) => error = Some("the transcription stopped unexpectedly".into()),
+                        Err(TryRecvError::Disconnected) => {
+                            error = Some("the transcription stopped unexpectedly".into())
+                        }
                         Err(TryRecvError::Empty) => {}
                     }
                 }
@@ -413,7 +451,9 @@ impl FloatingButton {
                     self.spin.set(self.spin.get() + 0.11);
                     loop {
                         match live.events.try_recv() {
-                            Ok(realtime::Event::Delta(text)) => self.live_text.borrow_mut().push_str(&text),
+                            Ok(realtime::Event::Delta(text)) => {
+                                self.live_text.borrow_mut().push_str(&text)
+                            }
                             Ok(realtime::Event::Done(text)) => {
                                 let so_far = self.live_text.borrow().clone();
                                 deliver = Some(if text.trim().is_empty() { so_far } else { text });
@@ -431,7 +471,8 @@ impl FloatingButton {
                             Ok(realtime::Event::Closed) | Err(TryRecvError::Disconnected) => {
                                 let so_far = self.live_text.borrow().clone();
                                 if so_far.trim().is_empty() {
-                                    error = Some("the live session closed without a transcript".into());
+                                    error =
+                                        Some("the live session closed without a transcript".into());
                                 } else {
                                     deliver = Some(so_far);
                                 }
@@ -440,7 +481,10 @@ impl FloatingButton {
                             Err(TryRecvError::Empty) => break,
                         }
                     }
-                    if deliver.is_none() && error.is_none() && started.elapsed() > Duration::from_secs(30) {
+                    if deliver.is_none()
+                        && error.is_none()
+                        && started.elapsed() > Duration::from_secs(30)
+                    {
                         let so_far = self.live_text.borrow().clone();
                         if so_far.trim().is_empty() {
                             error = Some("the live session did not finish in time".into());
@@ -459,7 +503,9 @@ impl FloatingButton {
             }
         }
         if let Some(text) = deliver {
-            *self.state.borrow_mut() = State::Done { until: Instant::now() + Duration::from_millis(1500) };
+            *self.state.borrow_mut() = State::Done {
+                until: Instant::now() + Duration::from_millis(1500),
+            };
             self.live_text.borrow_mut().clear();
             self.live_start.set(0);
             self.deliver(text);
@@ -521,19 +567,30 @@ impl FloatingButton {
 
         let state = self.state.borrow();
         let recording = matches!(&*state, State::Recording { .. });
-        let busy = matches!(&*state, State::Transcribing { .. } | State::Finishing { .. });
+        let busy = matches!(
+            &*state,
+            State::Transcribing { .. } | State::Finishing { .. }
+        );
         let (ar, ag, ab) = config::rgb(&self.app.config.borrow().button.color);
 
         if self.bubble_visible() {
             // Beside the disc, on whichever side has room.
-            let bx = if ox - GAP - BUBBLE_W >= 0.0 { ox - GAP - BUBBLE_W } else { ox + bw + GAP };
+            let bx = if ox - GAP - BUBBLE_W >= 0.0 {
+                ox - GAP - BUBBLE_W
+            } else {
+                ox + bw + GAP
+            };
             self.draw_bubble(cr, bx, oy + PAD + s, &self.live_text.borrow());
         }
 
         // The halo in the chosen colour is part of the mark: always there,
         // hugging the rim, and a little wider while you speak.
         {
-            let spread = if recording { 8.0 + self.level.get() as f64 * 12.0 } else { 8.0 };
+            let spread = if recording {
+                8.0 + self.level.get() as f64 * 12.0
+            } else {
+                8.0
+            };
             let glow = cairo::RadialGradient::new(cx, cy, s / 2.0 - 1.0, cx, cy, s / 2.0 + spread);
             glow.add_color_stop_rgba(0.0, ar, ag, ab, 0.70);
             glow.add_color_stop_rgba(0.4, ar, ag, ab, 0.28);
@@ -622,7 +679,9 @@ impl FloatingButton {
                 break;
             }
             let rest = &text[start..];
-            let Some(word_end) = rest.find(char::is_whitespace) else { break };
+            let Some(word_end) = rest.find(char::is_whitespace) else {
+                break;
+            };
             let mut next = start + word_end;
             while next < text.len() && text[next..].starts_with(char::is_whitespace) {
                 next += text[next..].chars().next().map_or(1, char::len_utf8);
@@ -692,7 +751,9 @@ fn draw_bars(cr: &cairo::Context, cx: f64, cy: f64, s: f64, bars: &[f32; 5]) {
 
 fn draw_counter(cr: &cairo::Context, text: &str, cx: f64, y: f64) {
     let layout = pangocairo::functions::create_layout(cr);
-    layout.set_font_description(Some(&pango::FontDescription::from_string("Monospace Bold 10")));
+    layout.set_font_description(Some(&pango::FontDescription::from_string(
+        "Monospace Bold 10",
+    )));
     layout.set_text(text);
     let (tw, _) = layout.pixel_size();
     let x = cx - tw as f64 / 2.0;

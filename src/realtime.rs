@@ -66,10 +66,20 @@ pub fn start(provider: &config::Provider, api_key: &str, audio: Receiver<Vec<u8>
     Session { events: rx }
 }
 
-fn run(provider: &config::Provider, api_key: &str, audio: Receiver<Vec<u8>>, tx: &Sender<Event>) -> Result<()> {
+fn run(
+    provider: &config::Provider,
+    api_key: &str,
+    audio: Receiver<Vec<u8>>,
+    tx: &Sender<Event>,
+) -> Result<()> {
     let base = normalize_base_url(&provider.base_url)?;
-    let ws_base = base.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
-    let url = format!("{ws_base}/audio/transcriptions/realtime?model={}", provider.model);
+    let ws_base = base
+        .replacen("https://", "wss://", 1)
+        .replacen("http://", "ws://", 1);
+    let url = format!(
+        "{ws_base}/audio/transcriptions/realtime?model={}",
+        provider.model
+    );
     let mut request = url.into_client_request()?;
     request
         .headers_mut()
@@ -98,7 +108,9 @@ fn run(provider: &config::Provider, api_key: &str, audio: Receiver<Vec<u8>>, tx:
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
-                        ws.send(Message::Text(json!({"type": "input_audio.end"}).to_string().into()))?;
+                        ws.send(Message::Text(
+                            json!({"type": "input_audio.end"}).to_string().into(),
+                        ))?;
                         ended_at = Some(Instant::now());
                         break;
                     }
@@ -115,7 +127,12 @@ fn run(provider: &config::Provider, api_key: &str, audio: Receiver<Vec<u8>>, tx:
                         }
                     }
                     "transcription.done" => {
-                        let t = value.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
+                        let t = value
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         let _ = tx.send(Event::Done(t));
                         let _ = ws.close(None);
                         return Ok(());
@@ -131,7 +148,8 @@ fn run(provider: &config::Provider, api_key: &str, audio: Receiver<Vec<u8>>, tx:
                 return Ok(());
             }
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(tungstenite::Error::ConnectionClosed) | Err(tungstenite::Error::AlreadyClosed) => {
                 let _ = tx.send(Event::Closed);
                 return Ok(());
@@ -161,7 +179,8 @@ fn wait_for_session(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<()>
             }
             Ok(Message::Close(_)) => return Err(anyhow!("the server closed the live session")),
             Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(e) => return Err(e).context("the live session failed to start"),
         }
         if Instant::now() > deadline {
@@ -199,7 +218,10 @@ mod tests {
 
     #[test]
     fn error_messages_may_be_strings_or_objects() {
-        assert_eq!(error_text(&json!({"error": {"message": "Unauthorized"}})), "Unauthorized");
+        assert_eq!(
+            error_text(&json!({"error": {"message": "Unauthorized"}})),
+            "Unauthorized"
+        );
         let nested = json!({"error": {"message": {"detail": [{"msg": "bad"}]}}});
         assert!(error_text(&nested).contains("bad"));
         assert_eq!(error_text(&json!({})), "unknown error");

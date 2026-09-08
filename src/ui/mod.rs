@@ -146,10 +146,18 @@ impl App {
 
     fn sync_action_states(&self) {
         let config = self.config.borrow();
-        if let Some(action) = self.gtk.lookup_action("size").and_downcast::<gio::SimpleAction>() {
+        if let Some(action) = self
+            .gtk
+            .lookup_action("size")
+            .and_downcast::<gio::SimpleAction>()
+        {
             action.set_state(&config.button.size.to_string().to_variant());
         }
-        if let Some(action) = self.gtk.lookup_action("color").and_downcast::<gio::SimpleAction>() {
+        if let Some(action) = self
+            .gtk
+            .lookup_action("color")
+            .and_downcast::<gio::SimpleAction>()
+        {
             action.set_state(&config.button.color.to_variant());
         }
     }
@@ -192,7 +200,10 @@ fn register_actions(app: &Rc<App>) {
     {
         let app = app.clone();
         size.connect_activate(move |action, parameter| {
-            let Some(value) = parameter.and_then(|p| p.str()).and_then(|s| s.parse::<u32>().ok()) else {
+            let Some(value) = parameter
+                .and_then(|p| p.str())
+                .and_then(|s| s.parse::<u32>().ok())
+            else {
                 return;
             };
             action.set_state(&value.to_string().to_variant());

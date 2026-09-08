@@ -121,8 +121,8 @@ impl Config {
         }
         let text = fs::read_to_string(&path)
             .with_context(|| format!("could not read {}", path.display()))?;
-        let config = toml::from_str(&text)
-            .with_context(|| format!("could not parse {}", path.display()))?;
+        let config =
+            toml::from_str(&text).with_context(|| format!("could not parse {}", path.display()))?;
         Ok(Some(config))
     }
 
@@ -195,7 +195,12 @@ impl Config {
         if !old.api_key.is_empty() || !old.model.is_empty() {
             self.remembered.insert(
                 old.name.clone(),
-                Remembered { api_key: old.api_key, base_url: old.base_url, model: old.model, realtime: old.realtime },
+                Remembered {
+                    api_key: old.api_key,
+                    base_url: old.base_url,
+                    model: old.model,
+                    realtime: old.realtime,
+                },
             );
         }
         self.remembered.remove(&self.provider.name);
@@ -257,7 +262,10 @@ mod tests {
         let back = config.remembered_for(Kind::Mistral).unwrap();
         assert_eq!(back.api_key, "mistral-key");
         assert_eq!(back.model, "voxtral-mini-latest");
-        assert_eq!(config.remembered_for(Kind::OpenAi).unwrap().api_key, "openai-key");
+        assert_eq!(
+            config.remembered_for(Kind::OpenAi).unwrap().api_key,
+            "openai-key"
+        );
         assert!(config.remembered_for(Kind::Groq).is_none());
     }
 

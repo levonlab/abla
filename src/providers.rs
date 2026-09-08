@@ -78,10 +78,15 @@ impl Kind {
             Kind::Mistral => {
                 // Dated snapshots that a `-latest` alias points at are the
                 // same model twice; only the alias is offered.
-                let alias_is_latest = entry
-                    .get("aliases")
-                    .and_then(Value::as_array)
-                    .is_some_and(|a| a.iter().filter_map(Value::as_str).any(|s| s.ends_with("-latest")));
+                let alias_is_latest =
+                    entry
+                        .get("aliases")
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .any(|s| s.ends_with("-latest"))
+                        });
                 if alias_is_latest && !id.ends_with("-latest") {
                     return None;
                 }
@@ -90,7 +95,10 @@ impl Kind {
                 if flag("audio_transcription_realtime") {
                     Some(Model { id, realtime: true })
                 } else if flag("audio_transcription") {
-                    Some(Model { id, realtime: false })
+                    Some(Model {
+                        id,
+                        realtime: false,
+                    })
                 } else {
                     None
                 }
@@ -99,13 +107,22 @@ impl Kind {
                 let lower = id.to_ascii_lowercase();
                 let transcribes = lower.contains("transcribe") || lower.starts_with("whisper");
                 let streams_only = lower.contains("realtime");
-                (transcribes && !streams_only).then_some(Model { id, realtime: false })
+                (transcribes && !streams_only).then_some(Model {
+                    id,
+                    realtime: false,
+                })
             }
             Kind::Groq => {
                 let lower = id.to_ascii_lowercase();
-                lower.contains("whisper").then_some(Model { id, realtime: false })
+                lower.contains("whisper").then_some(Model {
+                    id,
+                    realtime: false,
+                })
             }
-            Kind::Custom => Some(Model { id, realtime: false }),
+            Kind::Custom => Some(Model {
+                id,
+                realtime: false,
+            }),
         }
     }
 
@@ -133,8 +150,12 @@ pub fn list_models(kind: Kind, base_url: &str, api_key: &str) -> Result<Vec<Mode
         .call()
         .context("could not reach the provider")?;
     let status = response.status().as_u16();
-    let text = response.body_mut().read_to_string().context("could not read the answer")?;
-    let body: Value = serde_json::from_str(&text).context("the provider did not answer with JSON")?;
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .context("could not read the answer")?;
+    let body: Value =
+        serde_json::from_str(&text).context("the provider did not answer with JSON")?;
     if status == 401 || status == 403 {
         return Err(anyhow!("the API key was rejected"));
     }
@@ -195,12 +216,13 @@ mod tests {
 
     #[test]
     fn mistral_uses_capability_flags() {
-        let batch = json!({"id": "voxtral-mini-latest", "capabilities": {"audio_transcription": true}});
+        let batch =
+            json!({"id": "voxtral-mini-latest", "capabilities": {"audio_transcription": true}});
         let live = json!({"id": "voxtral-mini-realtime-latest",
                           "capabilities": {"audio_transcription_realtime": true}});
         let chat = json!({"id": "mistral-small-latest", "capabilities": {"completion_chat": true}});
-        assert_eq!(Kind::Mistral.classify(&batch).unwrap().realtime, false);
-        assert_eq!(Kind::Mistral.classify(&live).unwrap().realtime, true);
+        assert!(!Kind::Mistral.classify(&batch).unwrap().realtime);
+        assert!(Kind::Mistral.classify(&live).unwrap().realtime);
         assert!(Kind::Mistral.classify(&chat).is_none());
     }
 
@@ -214,43 +236,90 @@ mod tests {
                           "capabilities": {"audio_transcription": true}});
         assert!(Kind::Mistral.classify(&dated).is_none());
         assert!(Kind::Mistral.classify(&latest).is_some());
-        assert!(Kind::Mistral.classify(&lone).is_some(), "a snapshot with no alias is still offered");
+        assert!(
+            Kind::Mistral.classify(&lone).is_some(),
+            "a snapshot with no alias is still offered"
+        );
     }
 
     #[test]
     fn openai_and_groq_go_by_name() {
-        assert!(Kind::OpenAi.classify(&json!({"id": "gpt-4o-transcribe"})).is_some());
+        assert!(
+            Kind::OpenAi
+                .classify(&json!({"id": "gpt-4o-transcribe"}))
+                .is_some()
+        );
         assert!(Kind::OpenAi.classify(&json!({"id": "whisper-1"})).is_some());
-        assert!(Kind::OpenAi.classify(&json!({"id": "gpt-4o-realtime-preview"})).is_none());
+        assert!(
+            Kind::OpenAi
+                .classify(&json!({"id": "gpt-4o-realtime-preview"}))
+                .is_none()
+        );
         assert!(Kind::OpenAi.classify(&json!({"id": "gpt-4o"})).is_none());
-        assert!(Kind::Groq.classify(&json!({"id": "whisper-large-v3-turbo"})).is_some());
-        assert!(Kind::Groq.classify(&json!({"id": "llama-3.3-70b"})).is_none());
+        assert!(
+            Kind::Groq
+                .classify(&json!({"id": "whisper-large-v3-turbo"}))
+                .is_some()
+        );
+        assert!(
+            Kind::Groq
+                .classify(&json!({"id": "llama-3.3-70b"}))
+                .is_none()
+        );
     }
 
     #[test]
     fn latest_aliases_come_first_and_live_last() {
         let mut models = vec![
-            Model { id: "voxtral-mini-realtime-latest".into(), realtime: true },
-            Model { id: "voxtral-mini-2602".into(), realtime: false },
-            Model { id: "voxtral-mini-latest".into(), realtime: false },
+            Model {
+                id: "voxtral-mini-realtime-latest".into(),
+                realtime: true,
+            },
+            Model {
+                id: "voxtral-mini-2602".into(),
+                realtime: false,
+            },
+            Model {
+                id: "voxtral-mini-latest".into(),
+                realtime: false,
+            },
         ];
         Kind::Mistral.sort(&mut models);
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["voxtral-mini-latest", "voxtral-mini-2602", "voxtral-mini-realtime-latest"]);
+        assert_eq!(
+            ids,
+            [
+                "voxtral-mini-latest",
+                "voxtral-mini-2602",
+                "voxtral-mini-realtime-latest"
+            ]
+        );
     }
 
     #[test]
     fn base_urls_are_normalised() {
-        assert_eq!(normalize_base_url("https://api.mistral.ai").unwrap(), "https://api.mistral.ai/v1");
-        assert_eq!(normalize_base_url("https://api.mistral.ai/v1/").unwrap(), "https://api.mistral.ai/v1");
+        assert_eq!(
+            normalize_base_url("https://api.mistral.ai").unwrap(),
+            "https://api.mistral.ai/v1"
+        );
+        assert_eq!(
+            normalize_base_url("https://api.mistral.ai/v1/").unwrap(),
+            "https://api.mistral.ai/v1"
+        );
         assert!(normalize_base_url("api.mistral.ai").is_err());
         assert!(normalize_base_url("https://").is_err());
     }
 
     #[test]
     fn error_messages_are_extracted() {
-        assert_eq!(error_message(&json!({"error": {"message": "bad key"}}), 401), "HTTP 401: bad key");
-        assert_eq!(error_message(&json!({"message": "too big"}), 413), "HTTP 413: too big");
+        assert_eq!(
+            error_message(&json!({"error": {"message": "bad key"}}), 401),
+            "HTTP 401: bad key"
+        );
+        assert_eq!(
+            error_message(&json!({"message": "too big"}), 413),
+            "HTTP 413: too big"
+        );
         assert_eq!(error_message(&json!({}), 500), "HTTP 500");
     }
 }

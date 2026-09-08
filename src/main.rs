@@ -68,7 +68,10 @@ fn main() -> ExitCode {
         Some(Command::Autostart { state }) => {
             let on = state == "on";
             desktop::set_autostart(on).map(|_| {
-                println!("Abla will {}start when you log in.", if on { "" } else { "no longer " });
+                println!(
+                    "Abla will {}start when you log in.",
+                    if on { "" } else { "no longer " }
+                );
             })
         }
         Some(Command::Transcribe { file, live }) => transcribe_file(&file, live),
@@ -95,11 +98,20 @@ fn exit_code(result: Result<i32>) -> ExitCode {
 fn transcribe_file(file: &PathBuf, live: bool) -> Result<()> {
     let config = Config::load()?.context("abla is not set up yet: run `abla setup`")?;
     let key = config.api_key();
-    anyhow::ensure!(!key.is_empty(), "no API key: run `abla setup` or set ABLA_API_KEY");
-    let bytes = std::fs::read(file).with_context(|| format!("could not read {}", file.display()))?;
+    anyhow::ensure!(
+        !key.is_empty(),
+        "no API key: run `abla setup` or set ABLA_API_KEY"
+    );
+    let bytes =
+        std::fs::read(file).with_context(|| format!("could not read {}", file.display()))?;
     let pcm = audio::pcm_from_wav(&bytes).unwrap_or(bytes);
     let seconds = pcm.len() as f32 / audio::BYTES_PER_SECOND as f32;
-    eprintln!("{:.1} s of audio, {} ({})", seconds, config.provider.model, config.kind().label());
+    eprintln!(
+        "{:.1} s of audio, {} ({})",
+        seconds,
+        config.provider.model,
+        config.kind().label()
+    );
 
     if live {
         let (tx, rx) = channel();
@@ -122,11 +134,16 @@ fn transcribe_file(file: &PathBuf, live: bool) -> Result<()> {
                     let _ = std::io::stdout().flush();
                 }
                 Ok(realtime::Event::Done(t)) => {
-                    println!("\n--- final ({:.1} s) ---\n{t}", started.elapsed().as_secs_f32());
+                    println!(
+                        "\n--- final ({:.1} s) ---\n{t}",
+                        started.elapsed().as_secs_f32()
+                    );
                     return Ok(());
                 }
                 Ok(realtime::Event::Error(e)) => anyhow::bail!("{e}"),
-                Ok(realtime::Event::Closed) | Err(_) => anyhow::bail!("the live session closed without a transcript"),
+                Ok(realtime::Event::Closed) | Err(_) => {
+                    anyhow::bail!("the live session closed without a transcript")
+                }
             }
         }
     } else {

@@ -48,12 +48,7 @@ pub fn available() -> bool {
 
 pub fn ctrl_v() -> Result<()> {
     let socket = connect()?;
-    let steps = [
-        (KEY_LEFTCTRL, 1),
-        (KEY_V, 1),
-        (KEY_V, 0),
-        (KEY_LEFTCTRL, 0),
-    ];
+    let steps = [(KEY_LEFTCTRL, 1), (KEY_V, 1), (KEY_V, 0), (KEY_LEFTCTRL, 0)];
     for (code, value) in steps {
         socket.send(&event(EV_KEY, code, value))?;
         socket.send(&event(EV_SYN, SYN_REPORT, 0))?;

@@ -64,10 +64,12 @@ pub fn install() -> Result<Vec<PathBuf>> {
     let icon = icon_path();
     for path in [&entry, &icon] {
         if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
+            fs::create_dir_all(dir)
+                .with_context(|| format!("could not create {}", dir.display()))?;
         }
     }
-    fs::write(&entry, desktop_file()).with_context(|| format!("could not write {}", entry.display()))?;
+    fs::write(&entry, desktop_file())
+        .with_context(|| format!("could not write {}", entry.display()))?;
     fs::write(&icon, ICON_SVG).with_context(|| format!("could not write {}", icon.display()))?;
     if let Some(dir) = entry.parent() {
         let _ = Command::new("update-desktop-database").arg(dir).output();
@@ -88,7 +90,8 @@ pub fn set_autostart(on: bool) -> Result<()> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        fs::write(&path, desktop_file()).with_context(|| format!("could not write {}", path.display()))?;
+        fs::write(&path, desktop_file())
+            .with_context(|| format!("could not write {}", path.display()))?;
     } else if path.exists() {
         fs::remove_file(&path).with_context(|| format!("could not remove {}", path.display()))?;
     }
