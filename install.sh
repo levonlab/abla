@@ -43,7 +43,7 @@ if [ -n "$missing" ]; then
     if command -v dnf >/dev/null 2>&1; then
         echo "  sudo dnf install gtk4 gtk4-layer-shell pipewire-utils ydotool"
     elif command -v apt-get >/dev/null 2>&1; then
-        echo "  sudo apt install libgtk-4-1 libgtk4-layer-shell0 pipewire-bin ydotool"
+        echo "  sudo apt install libgtk-4-1 libgtk4-layer-shell0 pipewire-bin ydotool   (Debian 13, Ubuntu 25.10 or newer)"
     elif command -v pacman >/dev/null 2>&1; then
         echo "  sudo pacman -S gtk4 gtk4-layer-shell pipewire ydotool"
     else

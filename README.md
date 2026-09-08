@@ -16,7 +16,7 @@ Voice dictation for Linux. A floating button: click, talk, click again, and the 
 
 - A Wayland compositor that speaks layer-shell: **KDE Plasma 6**, **sway**, **Hyprland**, **niri**, **wayfire**, **labwc**, **river**. GNOME does not support layer-shell, so Abla does not run there yet.
 - PipeWire for the microphone (`pw-record`), which every current distribution ships.
-- GTK 4.12 or newer and `gtk4-layer-shell`.
+- GTK 4.12 or newer and `gtk4-layer-shell`. Fedora, Arch, Debian 13 and Ubuntu 25.10 ship it; Ubuntu 24.04 does not.
 - `ydotool` for automatic pasting. Optional: without it Abla leaves the text on the clipboard for you to paste. See [Automatic pasting](#automatic-pasting).
 - An API key from [Mistral](https://console.mistral.ai/api-keys), [OpenAI](https://platform.openai.com/api-keys) or [Groq](https://console.groq.com/keys). Abla does not quote prices; what a key costs is between you and your provider.
 
@@ -31,7 +31,7 @@ That downloads the latest release into `~/.local/bin`, adds **Abla** to your app
 ```sh
 # Fedora
 sudo dnf install gtk4 gtk4-layer-shell pipewire-utils ydotool
-# Debian, Ubuntu
+# Debian 13, Ubuntu 25.10 or newer
 sudo apt install libgtk-4-1 libgtk4-layer-shell0 pipewire-bin ydotool
 # Arch
 sudo pacman -S gtk4 gtk4-layer-shell pipewire ydotool

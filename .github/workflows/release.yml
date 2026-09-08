@@ -11,6 +11,8 @@ jobs:
   build:
     name: Build ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    # Built on Debian 13 so the binary runs on it and on anything newer.
+    container: debian:trixie
     strategy:
       matrix:
         include:
@@ -19,11 +21,13 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
-      - name: Install GTK 4 and gtk4-layer-shell
+      - name: Install GTK 4, gtk4-layer-shell and a C toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config \
+            libgtk-4-dev libgtk4-layer-shell-dev
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build

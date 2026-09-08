@@ -9,12 +9,16 @@ jobs:
   check:
     name: Build and test
     runs-on: ubuntu-24.04
+    # Debian 13 is the oldest Debian family release that ships gtk4-layer-shell.
+    container: debian:trixie
     steps:
-      - uses: actions/checkout@v4
-      - name: Install GTK 4 and gtk4-layer-shell
+      - name: Install GTK 4, gtk4-layer-shell and a C toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config \
+            libgtk-4-dev libgtk4-layer-shell-dev
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
