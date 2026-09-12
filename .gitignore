@@ -8,7 +8,6 @@
 # Editors and tooling
 .idea/
 .vscode/
-.claude/
 *.swp
 *~
 .DS_Store
