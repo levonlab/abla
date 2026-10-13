@@ -23,7 +23,7 @@ Voice dictation for Linux. A floating button: click, talk, click again, and the 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/levongabrielyan/abla/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/levonlab/abla/main/install.sh | sh
 ```
 
 That downloads the latest release into `~/.local/bin`, adds **Abla** to your application menu and tells you if a runtime library is missing. The libraries, per distribution:
@@ -40,7 +40,7 @@ sudo pacman -S gtk4 gtk4-layer-shell pipewire ydotool
 To build from source instead, install the development packages (`gtk4-devel gtk4-layer-shell-devel` on Fedora, `libgtk-4-dev libgtk4-layer-shell-dev` on Debian and Ubuntu, `gtk4 gtk4-layer-shell` on Arch) and run:
 
 ```sh
-cargo install --git https://github.com/levongabrielyan/abla
+cargo install --git https://github.com/levonlab/abla
 abla desktop
 ```
 

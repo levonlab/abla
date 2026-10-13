@@ -3,7 +3,7 @@
 # application menu. Safe to run again to update.
 set -eu
 
-REPO="levongabrielyan/abla"
+REPO="levonlab/abla"
 BIN_DIR="${ABLA_BIN_DIR:-$HOME/.local/bin}"
 
 arch=$(uname -m)
