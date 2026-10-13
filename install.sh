@@ -17,12 +17,25 @@ esac
 
 url="https://github.com/$REPO/releases/latest/download/abla-$arch"
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+sums=$(mktemp)
+trap 'rm -f "$tmp" "$sums"' EXIT
 
 echo "Downloading Abla for $arch…"
 if ! curl -fsSL "$url" -o "$tmp"; then
     echo "abla: download failed ($url)." >&2
     exit 1
+fi
+
+# Check the download against the checksums published with the release.
+if curl -fsSL "https://github.com/$REPO/releases/latest/download/SHA256SUMS" -o "$sums"; then
+    want=$(awk -v name="abla-$arch" '$2 == name || $2 == "*" name { print $1 }' "$sums")
+    have=$(sha256sum "$tmp" | awk '{ print $1 }')
+    if [ -z "$want" ] || [ "$want" != "$have" ]; then
+        echo "abla: the download does not match its published checksum. Nothing was installed." >&2
+        exit 1
+    fi
+else
+    echo "Note: this release was published without checksums, so the download was not verified."
 fi
 mkdir -p "$BIN_DIR"
 install -m 755 "$tmp" "$BIN_DIR/abla"
